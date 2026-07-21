@@ -1,0 +1,123 @@
+import { supabase } from "./supabase.js";
+import { getCatalog } from "./catalog.js";
+import { parseSaleComment } from "./parsing.js";
+import { connectToLive, type EulerConnection, type LiveComment } from "./euler.js";
+
+export type LiveSession = {
+  liveId: string;
+  shopId: string;
+  connection: EulerConnection;
+  wsOpenFailures: number;
+};
+
+export async function startLiveSession(
+  liveId: string,
+  shopId: string,
+  onEnded: (liveId: string) => void,
+  onWsOpenFailure: (liveId: string) => void
+): Promise<LiveSession> {
+  const { data: shop } = await supabase
+    .from("shops")
+    .select("tiktok_username")
+    .eq("id", shopId)
+    .single();
+
+  const tiktokUsername = shop?.tiktok_username;
+  if (!tiktokUsername) {
+    throw new Error(`Shop ${shopId} has no tiktok_username configured`);
+  }
+
+  const session: LiveSession = {
+    liveId,
+    shopId,
+    wsOpenFailures: 0,
+    connection: null as unknown as EulerConnection,
+  };
+
+  session.connection = connectToLive(tiktokUsername, {
+    onComment: (comment) => handleComment(liveId, shopId, comment),
+    onDisconnect: async () => {
+      await supabase
+        .from("lives")
+        .update({ status: "ended", ended_at: new Date().toISOString() })
+        .eq("id", liveId);
+      onEnded(liveId);
+    },
+    onError: () => {
+      session.wsOpenFailures += 1;
+      onWsOpenFailure(liveId);
+    },
+  });
+
+  return session;
+}
+
+async function handleComment(liveId: string, shopId: string, comment: LiveComment) {
+  const catalog = getCatalog(shopId);
+  const parsed = parseSaleComment(comment.text, catalog);
+  if (!parsed.isSale) return;
+
+  const buyerTiktokUsername = comment.username;
+
+  // Un panier "ouvert" par acheteur et par live (contrainte unique côté DB
+  // pending/validated agit comme filet en cas de course).
+  let { data: order } = await supabase
+    .from("live_orders")
+    .select("id")
+    .eq("live_id", liveId)
+    .eq("buyer_tiktok_username", buyerTiktokUsername)
+    .in("status", ["pending", "validated"])
+    .maybeSingle();
+
+  if (!order) {
+    const { data: created } = await supabase
+      .from("live_orders")
+      .insert({ live_id: liveId, shop_id: shopId, buyer_tiktok_username: buyerTiktokUsername })
+      .select("id")
+      .single();
+    order = created;
+  }
+  if (!order) return;
+
+  const unitPriceCents = parsed.product?.priceCents ?? 0;
+
+  // Idempotence : l'index unique (live_order_id, tiktok_comment_id) empêche
+  // le doublon si le WebSocket redélivre le même commentaire après reconnexion.
+  const { error } = await supabase.from("live_order_items").insert({
+    live_order_id: order.id,
+    product_id: parsed.product?.id ?? null,
+    variant_id: parsed.variant?.id ?? null,
+    size_label: parsed.variant?.label ?? null,
+    quantity: parsed.quantity,
+    unit_price_cents: unitPriceCents,
+    tiktok_comment_id: comment.commentId,
+    source_comment: comment.text,
+    raw_product_text: parsed.rawProductText ?? null,
+    raw_size_text: parsed.rawSizeText ?? null,
+    matched: parsed.matched,
+    match_score: parsed.matchScore ?? null,
+  });
+
+  if (error && error.code !== "23505") {
+    // 23505 = doublon idempotent, attendu en cas de redelivery ; toute autre
+    // erreur mérite d'être visible dans les logs du worker.
+    console.error(JSON.stringify({ level: "error", liveId, error: error.message }));
+    return;
+  }
+
+  await recomputeOrderTotal(order.id);
+}
+
+async function recomputeOrderTotal(orderId: string) {
+  const { data: items } = await supabase
+    .from("live_order_items")
+    .select("quantity, unit_price_cents")
+    .eq("live_order_id", orderId);
+
+  const total = (items ?? []).reduce(
+    (sum, item) => sum + item.quantity * item.unit_price_cents,
+    0
+  );
+
+  await supabase.from("live_orders").update({ total_cents: total }).eq("id", orderId);
+}

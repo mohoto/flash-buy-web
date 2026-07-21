@@ -1,0 +1,2 @@
+-- Baseline placeholder: already applied on remote (app mobile Flassh project).
+-- Remote is the source of truth for this migration's content.

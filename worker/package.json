@@ -1,0 +1,23 @@
+{
+  "name": "flassh-buy-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@eulerstream/euler-websocket-sdk": "^1.0.0",
+    "@supabase/supabase-js": "^2.110.7",
+    "fuse.js": "^7.1.0",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(claude mcp *)",
+      "Bash(python3 -c ' *)",
+      "Bash(npx supabase *)",
+      "mcp__supabase__list_tables",
+      "mcp__supabase__get_project_url",
+      "mcp__supabase__execute_sql",
+      "Bash(rm -f /tmp/remote_schema_dump.sql *)",
+      "mcp__supabase__get_publishable_keys",
+      "Bash(pnpm run *)",
+      "Bash(git mv *)",
+      "Bash(curl -s -o /dev/null -w \"GET / -> %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -s -o /dev/null -w \"GET /login -> %{http_code}\\\\n\" http://localhost:3000/login)",
+      "Bash(curl -s -i http://localhost:3000/dashboard)",
+      "Bash(curl -s -o /dev/null -w \"GET /login \\(page renders\\) -> %{http_code}\\\\n\" http://localhost:3000/login)",
+      "Bash(kill %1)",
+      "Bash(mkdir -p \"/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/\\(dashboard\\)/dashboard/catalogue/new\" *)",
+      "Bash(mkdir -p \"/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/\\(dashboard\\)/dashboard/lives\" *)",
+      "Bash(curl -s -o /dev/null -w \"GET /dashboard/lives \\(redirect check, no session\\) -> %{http_code}\\\\n\" http://localhost:3000/dashboard/lives)",
+      "Read(//tmp/**)",
+      "Bash(kill 82180)",
+      "Bash(mkdir -p \"/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/live/[cartSlug]\")",
+      "Bash(curl -s http://localhost:3000/live/destok-test)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/live/inexistant-slug-xyz)",
+      "Bash(curl -s -c /tmp/buyer_cookies.txt -i -X POST http://localhost:3000/live/destok-test -H \"Content-Type: application/x-www-form-urlencoded\" --data \"username=test_buyer_123\" -L -o /tmp/buyer_response.html -w \"%{http_code}\\\\n\")"
+    ],
+    "additionalDirectories": [
+      "/private/tmp",
+      "/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/(dashboard)/dashboard/catalogue",
+      "/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/(dashboard)/dashboard/live",
+      "/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/live"
+    ]
+  }
+}

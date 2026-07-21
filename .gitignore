@@ -2,6 +2,8 @@
 
 # dependencies
 /node_modules
+/worker/node_modules
+/worker/dist
 /.pnp
 .pnp.*
 .yarn/*
@@ -35,6 +37,9 @@ yarn-error.log*
 
 # vercel
 .vercel
+
+# mcp config (peut contenir des clés API en clair)
+.mcp.json
 
 # typescript
 *.tsbuildinfo
