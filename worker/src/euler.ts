@@ -61,8 +61,19 @@ export function connectToLive(
 
   const ws = new WebSocket(url);
 
+  ws.on("open", () => {
+    console.log(JSON.stringify({ level: "info", msg: "euler websocket opened", tiktokUsername }));
+  });
+
   ws.on("message", (raw) => {
     const envelope = parseIncomingMessage(raw);
+    console.log(JSON.stringify({
+      level: "info",
+      msg: "euler websocket message",
+      tiktokUsername,
+      type: envelope?.type ?? null,
+      rawPreview: raw.toString().slice(0, 300),
+    }));
     if (!envelope) return;
 
     if (envelope.type === "WebcastChatMessage") {
