@@ -16,33 +16,26 @@ export type EulerConnection = {
   disconnect: () => void;
 };
 
-// NOTE D'INTÉGRATION (à vérifier au premier test réel avec un compte Euler
-// Stream actif) : createWebSocketUrl()/ClientCloseCode/WebcastChatMessage
-// viennent du package officiel @eulerstream/euler-websocket-sdk, confirmés en
-// lisant ses types compilés — schéma v2 (export par défaut du SDK) :
+// Confirmé sur un live réel : Euler bundle les événements par défaut
+// (bundleEvents: true côté SDK) — chaque frame WebSocket contient
+// `{ messages: [{ type, data }, ...], timestamp }`, jamais un message isolé
+// à plat. createWebSocketUrl()/ClientCloseCode/WebcastChatMessage viennent du
+// package officiel @eulerstream/euler-websocket-sdk — schéma v2 :
 // WebcastChatMessage.comment = texte, .user.uniqueId = pseudo,
-// .common.msgId = id unique pour l'idempotence (v1 aurait été .event.msgId,
-// mais le SDK réexporte tiktok-live-proto/v2 par défaut).
-// Ce package ne fournit qu'un URL builder + des types — pas de client
-// WebSocket clé-en-main avec décodage automatique intégré. Ce qui reste
-// incertain et à valider avec un vrai live : la forme exacte des messages
-// reçus sur le WebSocket (JSON déjà décodé côté serveur Euler vs. frames
-// protobuf brutes à décoder soi-même via tiktok-live-proto). Le code
-// ci-dessous suppose du JSON `{ type: "WebcastChatMessage", data: {...} }`
-// (cohérent avec le typage DecodedData du SDK) ; si le test réel montre des
-// frames binaires, seul parseIncomingMessage() doit changer.
+// .common.msgId = id unique pour l'idempotence.
 type DecodedEnvelope = {
   type: string;
   data: unknown;
 };
 
-function parseIncomingMessage(raw: WebSocket.RawData): DecodedEnvelope | null {
+function parseIncomingMessages(raw: WebSocket.RawData): DecodedEnvelope[] {
   try {
     const parsed = JSON.parse(raw.toString());
-    if (parsed && typeof parsed.type === "string") return parsed;
-    return null;
+    if (Array.isArray(parsed?.messages)) return parsed.messages;
+    if (parsed && typeof parsed.type === "string") return [parsed];
+    return [];
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -66,28 +59,22 @@ export function connectToLive(
   });
 
   ws.on("message", (raw) => {
-    const envelope = parseIncomingMessage(raw);
-    console.log(JSON.stringify({
-      level: "info",
-      msg: "euler websocket message",
-      tiktokUsername,
-      type: envelope?.type ?? null,
-      rawPreview: raw.toString().slice(0, 300),
-    }));
-    if (!envelope) return;
+    const envelopes = parseIncomingMessages(raw);
 
-    if (envelope.type === "WebcastChatMessage") {
-      const chat = envelope.data as WebcastChatMessage;
-      if (!chat.common?.msgId || !chat.user?.uniqueId) return;
-      handlers.onComment({
-        commentId: chat.common.msgId,
-        username: chat.user.uniqueId,
-        text: chat.comment,
-      });
-    }
+    for (const envelope of envelopes) {
+      if (envelope.type === "WebcastChatMessage") {
+        const chat = envelope.data as WebcastChatMessage;
+        if (!chat.common?.msgId || !chat.user?.uniqueId) continue;
+        handlers.onComment({
+          commentId: chat.common.msgId,
+          username: chat.user.uniqueId,
+          text: chat.comment,
+        });
+      }
 
-    if (envelope.type === "tiktok.disconnect") {
-      handlers.onDisconnect("tiktok.disconnect");
+      if (envelope.type === "tiktok.disconnect") {
+        handlers.onDisconnect("tiktok.disconnect");
+      }
     }
   });
 
