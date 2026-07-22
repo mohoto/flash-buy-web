@@ -14,7 +14,7 @@ export async function startLiveSession(
   liveId: string,
   shopId: string,
   onEnded: (liveId: string) => void,
-  onWsOpenFailure: (liveId: string) => void
+  onWsOpenFailure: (liveId: string, err: Error) => void
 ): Promise<LiveSession> {
   const { data: shop } = await supabase
     .from("shops")
@@ -27,6 +27,16 @@ export async function startLiveSession(
     throw new Error(`Shop ${shopId} has no tiktok_username configured`);
   }
 
+  // Mots-clés figés au démarrage de la session : un changement fait depuis la
+  // console live pendant que le live tourne ne s'appliquera qu'à la prochaine
+  // connexion (pas de relecture par commentaire).
+  const { data: liveRow } = await supabase
+    .from("lives")
+    .select("sale_keywords")
+    .eq("id", liveId)
+    .single();
+  const saleKeywords = liveRow?.sale_keywords;
+
   const session: LiveSession = {
     liveId,
     shopId,
@@ -35,7 +45,7 @@ export async function startLiveSession(
   };
 
   session.connection = connectToLive(tiktokUsername, {
-    onComment: (comment) => handleComment(liveId, shopId, comment),
+    onComment: (comment) => handleComment(liveId, shopId, comment, saleKeywords),
     onDisconnect: async () => {
       await supabase
         .from("lives")
@@ -43,18 +53,23 @@ export async function startLiveSession(
         .eq("id", liveId);
       onEnded(liveId);
     },
-    onError: () => {
+    onError: (err) => {
       session.wsOpenFailures += 1;
-      onWsOpenFailure(liveId);
+      onWsOpenFailure(liveId, err);
     },
   });
 
   return session;
 }
 
-async function handleComment(liveId: string, shopId: string, comment: LiveComment) {
+async function handleComment(
+  liveId: string,
+  shopId: string,
+  comment: LiveComment,
+  saleKeywords?: string[]
+) {
   const catalog = getCatalog(shopId);
-  const parsed = parseSaleComment(comment.text, catalog);
+  const parsed = parseSaleComment(comment.text, catalog, saleKeywords);
   if (!parsed.isSale) return;
 
   const buyerTiktokUsername = comment.username;

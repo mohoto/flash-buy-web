@@ -33,9 +33,13 @@ async function onLiveEnded(liveId: string) {
   log("info", "live session ended", { liveId });
 }
 
-function onWsOpenFailure(liveId: string) {
+function onWsOpenFailure(liveId: string, err: Error) {
   wsOpenFailuresTotal += 1;
-  log("error", "websocket open failure", { liveId, totalFailures: wsOpenFailuresTotal });
+  log("error", "websocket open failure", {
+    liveId,
+    totalFailures: wsOpenFailuresTotal,
+    error: err.message,
+  });
 }
 
 // Boucle de claim : espacée par CLAIM_STAGGER_MS (anti-thundering-herd), ne
