@@ -7,7 +7,7 @@ export type CatalogProduct = {
   variants: { id: string; label: string }[];
 };
 
-const KEYWORDS = ["sold", "vendu"];
+export const DEFAULT_SALE_KEYWORDS = ["sold", "vendu"];
 const SIZE_VOCAB = new Set([
   "xs", "s", "m", "l", "xl", "xxl", "xxxl", "unique", "u",
 ]);
@@ -40,10 +40,12 @@ const MATCH_THRESHOLD = 0.6;
 
 export function parseSaleComment(
   comment: string,
-  catalog: CatalogProduct[]
+  catalog: CatalogProduct[],
+  saleKeywords: string[] = DEFAULT_SALE_KEYWORDS
 ): ParsedSale {
   const text = norm(comment);
-  const kw = KEYWORDS.find((k) => text.startsWith(k + " "));
+  const keywords = saleKeywords.length > 0 ? saleKeywords : DEFAULT_SALE_KEYWORDS;
+  const kw = keywords.map(norm).find((k) => text.startsWith(k + " "));
   if (!kw) return { isSale: false, quantity: 1, matched: false };
 
   const tokens = text.slice(kw.length).trim().split(" ").filter(Boolean);
