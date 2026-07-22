@@ -1,7 +1,7 @@
 import { supabase } from "./supabase.js";
 import { getCatalog } from "./catalog.js";
 import { parseSaleComment } from "./parsing.js";
-import { connectToLive, type EulerConnection, type LiveComment } from "./euler.js";
+import { connectToLive, type EulerConnection, type LiveComment, type LiveViewer } from "./euler.js";
 
 export type LiveSession = {
   liveId: string;
@@ -46,11 +46,14 @@ export async function startLiveSession(
 
   session.connection = connectToLive(tiktokUsername, {
     onComment: (comment) => handleComment(liveId, shopId, comment, saleKeywords),
+    onViewerJoin: (viewer) => handleViewerJoin(liveId, viewer),
+    onViewerLeave: (viewer) => handleViewerLeave(liveId, viewer),
     onDisconnect: async () => {
       await supabase
         .from("lives")
         .update({ status: "ended", ended_at: new Date().toISOString() })
         .eq("id", liveId);
+      await supabase.from("live_viewers").delete().eq("live_id", liveId);
       onEnded(liveId);
     },
     onError: (err) => {
@@ -60,6 +63,27 @@ export async function startLiveSession(
   });
 
   return session;
+}
+
+async function handleViewerJoin(liveId: string, viewer: LiveViewer) {
+  await supabase.from("live_viewers").upsert(
+    {
+      live_id: liveId,
+      tiktok_user_id: viewer.userId,
+      tiktok_username: viewer.username,
+      nickname: viewer.nickname,
+      profile_picture_url: viewer.profilePictureUrl,
+    },
+    { onConflict: "live_id,tiktok_user_id" }
+  );
+}
+
+async function handleViewerLeave(liveId: string, viewer: LiveViewer) {
+  await supabase
+    .from("live_viewers")
+    .delete()
+    .eq("live_id", liveId)
+    .eq("tiktok_user_id", viewer.userId);
 }
 
 async function handleComment(

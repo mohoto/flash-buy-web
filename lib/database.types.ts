@@ -388,6 +388,44 @@ export type Database = {
           },
         ]
       }
+      live_viewers: {
+        Row: {
+          id: string
+          joined_at: string
+          live_id: string
+          nickname: string | null
+          profile_picture_url: string | null
+          tiktok_user_id: string
+          tiktok_username: string
+        }
+        Insert: {
+          id?: string
+          joined_at?: string
+          live_id: string
+          nickname?: string | null
+          profile_picture_url?: string | null
+          tiktok_user_id: string
+          tiktok_username: string
+        }
+        Update: {
+          id?: string
+          joined_at?: string
+          live_id?: string
+          nickname?: string | null
+          profile_picture_url?: string | null
+          tiktok_user_id?: string
+          tiktok_username?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_viewers_live_id_fkey"
+            columns: ["live_id"]
+            isOneToOne: false
+            referencedRelation: "lives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lives: {
         Row: {
           claimed_at: string | null
@@ -396,6 +434,7 @@ export type Database = {
           euler_alert_id: string | null
           heartbeat_at: string | null
           id: string
+          sale_keywords: string[]
           shop_id: string
           started_at: string | null
           status: Database["public"]["Enums"]["live_status"]
@@ -409,6 +448,7 @@ export type Database = {
           euler_alert_id?: string | null
           heartbeat_at?: string | null
           id?: string
+          sale_keywords?: string[]
           shop_id: string
           started_at?: string | null
           status?: Database["public"]["Enums"]["live_status"]
@@ -422,6 +462,7 @@ export type Database = {
           euler_alert_id?: string | null
           heartbeat_at?: string | null
           id?: string
+          sale_keywords?: string[]
           shop_id?: string
           started_at?: string | null
           status?: Database["public"]["Enums"]["live_status"]

@@ -2,7 +2,12 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getOwnShop } from "@/lib/dashboard/get-own-shop";
 import { LiveConsoleClient } from "./live-console-client";
+import { LiveBadge } from "./live-badge";
+import { TiktokPanel } from "./tiktok-panel";
+import { LiveConnectionSettings } from "./live-connection-settings";
+import { LiveViewersPanel } from "./live-viewers-panel";
 import { endLive } from "../../lives/actions";
+import { Button } from "@/components/ui/button";
 
 export default async function LiveConsolePage({
   params,
@@ -15,7 +20,7 @@ export default async function LiveConsolePage({
 
   const { data: live } = await supabase
     .from("lives")
-    .select("id, status, started_at")
+    .select("id, status, started_at, sale_keywords, worker_id, heartbeat_at")
     .eq("id", liveId)
     .eq("shop_id", shop.id)
     .single();
@@ -37,7 +42,7 @@ export default async function LiveConsolePage({
   const { data: items } = await supabase
     .from("live_order_items")
     .select(
-      "id, live_order_id, product_id, variant_id, size_label, quantity, unit_price_cents, raw_product_text, raw_size_text, matched, match_score"
+      "id, live_order_id, product_id, variant_id, size_label, quantity, unit_price_cents, raw_product_text, raw_size_text, source_comment, matched, match_score, created_at"
     )
     .in("live_order_id", (orders ?? []).map((o) => o.id));
 
@@ -54,29 +59,47 @@ export default async function LiveConsolePage({
     variants: p.product_variants ?? [],
   }));
 
+  const { data: viewers } = await supabase
+    .from("live_viewers")
+    .select("id, tiktok_user_id, tiktok_username, nickname, profile_picture_url")
+    .eq("live_id", liveId)
+    .order("joined_at", { ascending: false });
+
   return (
     <div>
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
-          Console Live
-        </h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold text-foreground">Console Live</h1>
+          {live.status === "live" && <LiveBadge />}
+        </div>
         {live.status === "live" && (
           <form action={endLive.bind(null, liveId)}>
-            <button
-              type="submit"
-              className="rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
-            >
+            <Button type="submit" variant="destructive-outline">
               Terminer le live
-            </button>
+            </Button>
           </form>
         )}
       </div>
 
-      <LiveConsoleClient
-        liveId={liveId}
-        initialOrders={initialOrders}
-        products={productOptions}
-      />
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
+        <LiveConsoleClient
+          liveId={liveId}
+          initialOrders={initialOrders}
+          products={productOptions}
+          saleKeywords={live.sale_keywords}
+        />
+        <div className="flex flex-col gap-6">
+          <TiktokPanel tiktokUsername={shop.tiktok_username} />
+          <LiveConnectionSettings
+            liveId={liveId}
+            tiktokUsername={shop.tiktok_username}
+            saleKeywords={live.sale_keywords}
+            workerId={live.worker_id}
+            heartbeatAt={live.heartbeat_at}
+          />
+          <LiveViewersPanel liveId={liveId} initialViewers={viewers ?? []} />
+        </div>
+      </div>
     </div>
   );
 }

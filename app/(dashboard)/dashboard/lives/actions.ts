@@ -39,6 +39,8 @@ export async function endLive(liveId: string) {
     .eq("id", liveId)
     .eq("shop_id", shop.id);
 
+  await supabase.from("live_viewers").delete().eq("live_id", liveId);
+
   revalidatePath("/dashboard/lives");
   revalidatePath(`/dashboard/live/${liveId}`);
 }
