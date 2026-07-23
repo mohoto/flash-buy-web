@@ -52,6 +52,7 @@ export async function startLiveSession(
         .from("lives")
         .update({ status: "ended", ended_at: new Date().toISOString() })
         .eq("id", liveId);
+      await supabase.from("live_viewers").delete().eq("live_id", liveId);
       onEnded(liveId);
     },
     onError: (err) => {
