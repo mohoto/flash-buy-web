@@ -50,6 +50,7 @@ export function LiveConnectionSettings({
               defaultValue={tiktokUsername ?? ""}
               placeholder="@monshop"
               className="flex-1"
+              nativeInput
             />
             <Button type="submit" size="sm" variant="secondary">
               Enregistrer
@@ -72,6 +73,7 @@ export function LiveConnectionSettings({
               defaultValue={saleKeywords.join(", ")}
               placeholder="sold, vendu"
               className="flex-1"
+              nativeInput
             />
             <Button type="submit" size="sm" variant="secondary">
               Enregistrer
