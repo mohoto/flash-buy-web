@@ -45,10 +45,17 @@ export function parseSaleComment(
 ): ParsedSale {
   const text = norm(comment);
   const keywords = saleKeywords.length > 0 ? saleKeywords : DEFAULT_SALE_KEYWORDS;
-  const kw = keywords.map(norm).find((k) => text.startsWith(k + " "));
-  if (!kw) return { isSale: false, quantity: 1, matched: false };
 
-  const tokens = text.slice(kw.length).trim().split(" ").filter(Boolean);
+  // Le mot-clé peut apparaître n'importe où dans le commentaire (pas
+  // seulement en premier mot), tant qu'il forme un mot isolé — délimité par
+  // des espaces ou les bords de la chaîne, jamais un simple sous-texte
+  // d'un autre mot (ex. "jp" ne doit pas matcher dans "djprend").
+  const words = text.split(" ").filter(Boolean);
+  const normalizedKeywords = keywords.map(norm);
+  const kwIndex = words.findIndex((w) => normalizedKeywords.includes(w));
+  if (kwIndex === -1) return { isSale: false, quantity: 1, matched: false };
+
+  const tokens = words.slice(kwIndex + 1);
 
   // 1) quantité = dernier token entier (absente => 1)
   let quantity = 1;
