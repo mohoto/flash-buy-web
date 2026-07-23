@@ -47,12 +47,13 @@ export function parseSaleComment(
   const keywords = saleKeywords.length > 0 ? saleKeywords : DEFAULT_SALE_KEYWORDS;
 
   // Le mot-clé peut apparaître n'importe où dans le commentaire (pas
-  // seulement en premier mot), tant qu'il forme un mot isolé — délimité par
-  // des espaces ou les bords de la chaîne, jamais un simple sous-texte
-  // d'un autre mot (ex. "jp" ne doit pas matcher dans "djprend").
+  // seulement en premier mot) et peut être collé à un mot précédent
+  // ("trop beaujp robe M 2"), mais doit être suivi d'un espace ou de la fin
+  // de la chaîne — jamais collé au mot suivant ("jprobe" ne doit pas
+  // matcher "jp", pour ne pas capter un faux positif sur le produit).
   const words = text.split(" ").filter(Boolean);
   const normalizedKeywords = keywords.map(norm);
-  const kwIndex = words.findIndex((w) => normalizedKeywords.includes(w));
+  const kwIndex = words.findIndex((w) => normalizedKeywords.some((k) => w.endsWith(k)));
   if (kwIndex === -1) return { isSale: false, quantity: 1, matched: false };
 
   const tokens = words.slice(kwIndex + 1);
