@@ -391,7 +391,7 @@ export type Database = {
       live_viewers: {
         Row: {
           id: string
-          joined_at: string
+          last_comment_at: string
           live_id: string
           nickname: string | null
           profile_picture_url: string | null
@@ -400,7 +400,7 @@ export type Database = {
         }
         Insert: {
           id?: string
-          joined_at?: string
+          last_comment_at?: string
           live_id: string
           nickname?: string | null
           profile_picture_url?: string | null
@@ -409,7 +409,7 @@ export type Database = {
         }
         Update: {
           id?: string
-          joined_at?: string
+          last_comment_at?: string
           live_id?: string
           nickname?: string | null
           profile_picture_url?: string | null
@@ -439,6 +439,7 @@ export type Database = {
           started_at: string | null
           status: Database["public"]["Enums"]["live_status"]
           tiktok_room_id: string | null
+          viewer_count: number | null
           worker_id: string | null
         }
         Insert: {
@@ -453,6 +454,7 @@ export type Database = {
           started_at?: string | null
           status?: Database["public"]["Enums"]["live_status"]
           tiktok_room_id?: string | null
+          viewer_count?: number | null
           worker_id?: string | null
         }
         Update: {
@@ -467,6 +469,7 @@ export type Database = {
           started_at?: string | null
           status?: Database["public"]["Enums"]["live_status"]
           tiktok_room_id?: string | null
+          viewer_count?: number | null
           worker_id?: string | null
         }
         Relationships: [

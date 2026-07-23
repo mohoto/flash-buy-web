@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 
-type Viewer = {
+type Commenter = {
   id: string;
   tiktok_user_id: string;
   tiktok_username: string;
@@ -22,24 +22,27 @@ const listItemMotion = {
 
 export function LiveViewersPanel({
   liveId,
-  initialViewers,
+  initialCommenters,
+  initialViewerCount,
 }: {
   liveId: string;
-  initialViewers: Viewer[];
+  initialCommenters: Commenter[];
+  initialViewerCount: number | null;
 }) {
-  const [viewers, setViewers] = useState(initialViewers);
+  const [commenters, setCommenters] = useState(initialCommenters);
+  const [viewerCount, setViewerCount] = useState(initialViewerCount);
 
   useEffect(() => {
     const supabase = createClient();
 
-    const refetch = async () => {
+    const refetchCommenters = async () => {
       const { data } = await supabase
         .from("live_viewers")
         .select("id, tiktok_user_id, tiktok_username, nickname, profile_picture_url")
         .eq("live_id", liveId)
-        .order("joined_at", { ascending: false });
+        .order("last_comment_at", { ascending: false });
 
-      if (data) setViewers(data);
+      if (data) setCommenters(data);
     };
 
     const channel = supabase
@@ -47,7 +50,15 @@ export function LiveViewersPanel({
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "live_viewers", filter: `live_id=eq.${liveId}` },
-        refetch
+        refetchCommenters
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "lives", filter: `id=eq.${liveId}` },
+        (payload) => {
+          const next = (payload.new as { viewer_count: number | null }).viewer_count;
+          setViewerCount(next);
+        }
       )
       .subscribe();
 
@@ -60,45 +71,56 @@ export function LiveViewersPanel({
     <Card>
       <CardContent className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-foreground">Spectateurs en direct</p>
-          <span className="text-xs text-muted-foreground">{viewers.length}</span>
+          <p className="text-sm font-medium text-foreground">Spectateurs</p>
+          <span className="text-xs text-muted-foreground">
+            {viewerCount !== null ? `${viewerCount} présents` : "—"}
+          </span>
         </div>
 
-        {viewers.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Aucun spectateur détecté pour l&apos;instant.</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            <AnimatePresence initial={false}>
-              {viewers.map((viewer) => (
-                <motion.li
-                  key={viewer.id}
-                  layout
-                  {...listItemMotion}
-                  className="flex items-center gap-2 list-none"
-                >
-                  {viewer.profile_picture_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- avatars TikTok externes, non optimisables par next/image
-                    <img
-                      src={viewer.profile_picture_url}
-                      alt={viewer.tiktok_username}
-                      className="size-8 shrink-0 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">
-                      {viewer.tiktok_username.slice(0, 2).toUpperCase()}
+        <div>
+          <p className="text-xs text-muted-foreground">
+            Actifs ({commenters.length})
+          </p>
+          {commenters.length === 0 ? (
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              Personne n&apos;a encore commenté.
+            </p>
+          ) : (
+            <ul className="mt-1.5 flex flex-col gap-2">
+              <AnimatePresence initial={false}>
+                {commenters.map((commenter) => (
+                  <motion.li
+                    key={commenter.id}
+                    layout
+                    {...listItemMotion}
+                    className="flex items-center gap-2 list-none"
+                  >
+                    {commenter.profile_picture_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- avatars TikTok externes, non optimisables par next/image
+                      <img
+                        src={commenter.profile_picture_url}
+                        alt={commenter.tiktok_username}
+                        className="size-8 shrink-0 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">
+                        {commenter.tiktok_username.slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-foreground">
+                        {commenter.nickname || commenter.tiktok_username}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        @{commenter.tiktok_username}
+                      </p>
                     </div>
-                  )}
-                  <div className="min-w-0">
-                    <p className="truncate text-sm text-foreground">
-                      {viewer.nickname || viewer.tiktok_username}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">@{viewer.tiktok_username}</p>
-                  </div>
-                </motion.li>
-              ))}
-            </AnimatePresence>
-          </ul>
-        )}
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+            </ul>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

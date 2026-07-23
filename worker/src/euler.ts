@@ -3,35 +3,22 @@ import {
   createWebSocketUrl,
   ClientCloseCode,
   type WebcastChatMessage,
-  type PresenceRecord,
+  type WebcastRoomUserSeqMessage,
 } from "@eulerstream/euler-websocket-sdk";
 import { config } from "./config.js";
 
 export type LiveComment = {
   commentId: string;
-  username: string;
-  text: string;
-};
-
-export type LiveViewer = {
   userId: string;
   username: string;
   nickname: string;
   profilePictureUrl: string | null;
+  text: string;
 };
 
 export type EulerConnection = {
   disconnect: () => void;
 };
-
-function toLiveViewer(record: PresenceRecord): LiveViewer {
-  return {
-    userId: record.user.userId,
-    username: record.user.uniqueId,
-    nickname: record.user.nickname,
-    profilePictureUrl: record.user.profilePicture?.url?.[0] ?? null,
-  };
-}
 
 // Confirmé sur un live réel : Euler bundle les événements par défaut
 // (bundleEvents: true côté SDK) — chaque frame WebSocket contient
@@ -60,8 +47,7 @@ export function connectToLive(
   tiktokUsername: string,
   handlers: {
     onComment: (comment: LiveComment) => void;
-    onViewerJoin: (viewer: LiveViewer) => void;
-    onViewerLeave: (viewer: LiveViewer) => void;
+    onViewerCount: (viewerCount: number) => void;
     onDisconnect: (reason: string) => void;
     onError: (error: Error) => void;
   }
@@ -69,7 +55,6 @@ export function connectToLive(
   const url = createWebSocketUrl({
     uniqueId: tiktokUsername,
     apiKey: config.eulerApiKey,
-    features: { syntheticPresence: true },
   });
 
   const ws = new WebSocket(url);
@@ -87,7 +72,10 @@ export function connectToLive(
         if (!chat.common?.msgId || !chat.user?.uniqueId) continue;
         handlers.onComment({
           commentId: chat.common.msgId,
+          userId: chat.user.userId,
           username: chat.user.uniqueId,
+          nickname: chat.user.nickname,
+          profilePictureUrl: chat.user.profilePicture?.url?.[0] ?? null,
           text: chat.comment,
         });
       }
@@ -96,12 +84,9 @@ export function connectToLive(
         handlers.onDisconnect("tiktok.disconnect");
       }
 
-      if (envelope.type === "SyntheticJoinMessage") {
-        handlers.onViewerJoin(toLiveViewer(envelope.data as PresenceRecord));
-      }
-
-      if (envelope.type === "SyntheticLeaveMessage") {
-        handlers.onViewerLeave(toLiveViewer(envelope.data as PresenceRecord));
+      if (envelope.type === "WebcastRoomUserSeqMessage") {
+        const seq = envelope.data as WebcastRoomUserSeqMessage;
+        handlers.onViewerCount(seq.viewerCount);
       }
     }
   });

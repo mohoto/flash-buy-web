@@ -1,7 +1,7 @@
 import { supabase } from "./supabase.js";
 import { getCatalog } from "./catalog.js";
 import { parseSaleComment } from "./parsing.js";
-import { connectToLive, type EulerConnection, type LiveComment, type LiveViewer } from "./euler.js";
+import { connectToLive, type EulerConnection, type LiveComment } from "./euler.js";
 
 export type LiveSession = {
   liveId: string;
@@ -46,14 +46,12 @@ export async function startLiveSession(
 
   session.connection = connectToLive(tiktokUsername, {
     onComment: (comment) => handleComment(liveId, shopId, comment, saleKeywords),
-    onViewerJoin: (viewer) => handleViewerJoin(liveId, viewer),
-    onViewerLeave: (viewer) => handleViewerLeave(liveId, viewer),
+    onViewerCount: (viewerCount) => handleViewerCount(liveId, viewerCount),
     onDisconnect: async () => {
       await supabase
         .from("lives")
         .update({ status: "ended", ended_at: new Date().toISOString() })
         .eq("id", liveId);
-      await supabase.from("live_viewers").delete().eq("live_id", liveId);
       onEnded(liveId);
     },
     onError: (err) => {
@@ -65,25 +63,26 @@ export async function startLiveSession(
   return session;
 }
 
-async function handleViewerJoin(liveId: string, viewer: LiveViewer) {
+async function handleViewerCount(liveId: string, viewerCount: number) {
+  await supabase.from("lives").update({ viewer_count: viewerCount }).eq("id", liveId);
+}
+
+// Un commentateur actif = quelqu'un ayant posté au moins un commentaire
+// (TikTok n'expose aucune liste des spectateurs présents, seulement un
+// compteur agrégé — cf. handleViewerCount). Mis à jour pour tout
+// commentaire, reconnu comme vente ou non.
+async function trackActiveCommenter(liveId: string, comment: LiveComment) {
   await supabase.from("live_viewers").upsert(
     {
       live_id: liveId,
-      tiktok_user_id: viewer.userId,
-      tiktok_username: viewer.username,
-      nickname: viewer.nickname,
-      profile_picture_url: viewer.profilePictureUrl,
+      tiktok_user_id: comment.userId,
+      tiktok_username: comment.username,
+      nickname: comment.nickname,
+      profile_picture_url: comment.profilePictureUrl,
+      last_comment_at: new Date().toISOString(),
     },
     { onConflict: "live_id,tiktok_user_id" }
   );
-}
-
-async function handleViewerLeave(liveId: string, viewer: LiveViewer) {
-  await supabase
-    .from("live_viewers")
-    .delete()
-    .eq("live_id", liveId)
-    .eq("tiktok_user_id", viewer.userId);
 }
 
 async function handleComment(
@@ -92,6 +91,8 @@ async function handleComment(
   comment: LiveComment,
   saleKeywords?: string[]
 ) {
+  await trackActiveCommenter(liveId, comment);
+
   const catalog = getCatalog(shopId);
   const parsed = parseSaleComment(comment.text, catalog, saleKeywords);
   if (!parsed.isSale) return;

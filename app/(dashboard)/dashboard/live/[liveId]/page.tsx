@@ -20,7 +20,7 @@ export default async function LiveConsolePage({
 
   const { data: live } = await supabase
     .from("lives")
-    .select("id, status, started_at, sale_keywords, worker_id, heartbeat_at")
+    .select("id, status, started_at, sale_keywords, worker_id, heartbeat_at, viewer_count")
     .eq("id", liveId)
     .eq("shop_id", shop.id)
     .single();
@@ -59,11 +59,11 @@ export default async function LiveConsolePage({
     variants: p.product_variants ?? [],
   }));
 
-  const { data: viewers } = await supabase
+  const { data: commenters } = await supabase
     .from("live_viewers")
     .select("id, tiktok_user_id, tiktok_username, nickname, profile_picture_url")
     .eq("live_id", liveId)
-    .order("joined_at", { ascending: false });
+    .order("last_comment_at", { ascending: false });
 
   return (
     <div>
@@ -97,7 +97,11 @@ export default async function LiveConsolePage({
             workerId={live.worker_id}
             heartbeatAt={live.heartbeat_at}
           />
-          <LiveViewersPanel liveId={liveId} initialViewers={viewers ?? []} />
+          <LiveViewersPanel
+            liveId={liveId}
+            initialCommenters={commenters ?? []}
+            initialViewerCount={live.viewer_count}
+          />
         </div>
       </div>
     </div>
