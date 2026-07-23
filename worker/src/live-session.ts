@@ -10,6 +10,21 @@ export type LiveSession = {
   wsOpenFailures: number;
 };
 
+// Debounce en mémoire pour éviter de saturer Supabase en écriture sous fort
+// trafic (spectateur qui spam les commentaires, viewerCount envoyé plusieurs
+// fois par seconde par TikTok) — la fraîcheur perçue sur le dashboard reste
+// quasi temps réel, seul le volume d'écritures DB est réduit.
+const DB_WRITE_DEBOUNCE_MS = 5_000;
+const lastCommenterWriteAt = new Map<string, number>(); // clé: `${liveId}:${userId}`
+const lastViewerCountWriteAt = new Map<string, number>(); // clé: liveId
+
+function clearDebounceState(liveId: string) {
+  lastViewerCountWriteAt.delete(liveId);
+  for (const key of lastCommenterWriteAt.keys()) {
+    if (key.startsWith(`${liveId}:`)) lastCommenterWriteAt.delete(key);
+  }
+}
+
 export async function startLiveSession(
   liveId: string,
   shopId: string,
@@ -53,6 +68,7 @@ export async function startLiveSession(
         .update({ status: "ended", ended_at: new Date().toISOString() })
         .eq("id", liveId);
       await supabase.from("live_viewers").delete().eq("live_id", liveId);
+      clearDebounceState(liveId);
       onEnded(liveId);
     },
     onError: (err) => {
@@ -65,14 +81,27 @@ export async function startLiveSession(
 }
 
 async function handleViewerCount(liveId: string, viewerCount: number) {
+  const now = Date.now();
+  const lastWrite = lastViewerCountWriteAt.get(liveId) ?? 0;
+  if (now - lastWrite < DB_WRITE_DEBOUNCE_MS) return;
+  lastViewerCountWriteAt.set(liveId, now);
+
   await supabase.from("lives").update({ viewer_count: viewerCount }).eq("id", liveId);
 }
 
 // Un commentateur actif = quelqu'un ayant posté au moins un commentaire
 // (TikTok n'expose aucune liste des spectateurs présents, seulement un
 // compteur agrégé — cf. handleViewerCount). Mis à jour pour tout
-// commentaire, reconnu comme vente ou non.
+// commentaire, reconnu comme vente ou non. Debounce par utilisateur : un
+// spectateur qui enchaîne les commentaires ne déclenche qu'un upsert toutes
+// les DB_WRITE_DEBOUNCE_MS, pas un par message.
 async function trackActiveCommenter(liveId: string, comment: LiveComment) {
+  const key = `${liveId}:${comment.userId}`;
+  const now = Date.now();
+  const lastWrite = lastCommenterWriteAt.get(key) ?? 0;
+  if (now - lastWrite < DB_WRITE_DEBOUNCE_MS) return;
+  lastCommenterWriteAt.set(key, now);
+
   await supabase.from("live_viewers").upsert(
     {
       live_id: liveId,
