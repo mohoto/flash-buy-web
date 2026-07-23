@@ -8,6 +8,7 @@ import { LiveConnectionSettings } from "./live-connection-settings";
 import { LiveViewersPanel } from "./live-viewers-panel";
 import { endLive } from "../../lives/actions";
 import { Button } from "@/components/ui/button";
+import { Frame, FramePanel } from "@/components/ui/frame";
 
 export default async function LiveConsolePage({
   params,
@@ -65,11 +66,18 @@ export default async function LiveConsolePage({
     .eq("live_id", liveId)
     .order("last_comment_at", { ascending: false });
 
+  const pendingCount = initialOrders.filter((o) => o.status === "pending").length;
+  const validatedTotalCents = initialOrders
+    .filter((o) => o.status === "validated")
+    .reduce((sum, o) => sum + o.total_cents, 0);
+
   return (
-    <div>
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold text-foreground">Console Live</h1>
+          <h1 className="font-heading text-2xl font-semibold text-foreground">
+            Console Live
+          </h1>
           {live.status === "live" && <LiveBadge />}
         </div>
         {live.status === "live" && (
@@ -81,29 +89,64 @@ export default async function LiveConsolePage({
         )}
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatCard
+          label="Commandes en attente"
+          value={String(pendingCount)}
+        />
+        <StatCard
+          label="Total validé"
+          value={`${(validatedTotalCents / 100).toFixed(2)} €`}
+        />
+        <StatCard
+          label="Spectateurs"
+          value={live.viewer_count !== null ? String(live.viewer_count) : "—"}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
         <LiveConsoleClient
           liveId={liveId}
           initialOrders={initialOrders}
           products={productOptions}
           saleKeywords={live.sale_keywords}
         />
-        <div className="flex flex-col gap-6">
-          <TiktokPanel tiktokUsername={shop.tiktok_username} />
-          <LiveConnectionSettings
-            liveId={liveId}
-            tiktokUsername={shop.tiktok_username}
-            saleKeywords={live.sale_keywords}
-            workerId={live.worker_id}
-            heartbeatAt={live.heartbeat_at}
-          />
-          <LiveViewersPanel
-            liveId={liveId}
-            initialCommenters={commenters ?? []}
-            initialViewerCount={live.viewer_count}
-          />
-        </div>
+
+        <Frame className="h-fit">
+          <FramePanel>
+            <TiktokPanel tiktokUsername={shop.tiktok_username} />
+          </FramePanel>
+          <FramePanel>
+            <LiveConnectionSettings
+              liveId={liveId}
+              tiktokUsername={shop.tiktok_username}
+              saleKeywords={live.sale_keywords}
+              workerId={live.worker_id}
+              heartbeatAt={live.heartbeat_at}
+            />
+          </FramePanel>
+          <FramePanel>
+            <LiveViewersPanel
+              liveId={liveId}
+              initialCommenters={commenters ?? []}
+              initialViewerCount={live.viewer_count}
+            />
+          </FramePanel>
+        </Frame>
       </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border bg-card px-4 py-3 shadow-xs/5">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-1 font-heading text-2xl font-semibold tabular-nums text-foreground">
+        {value}
+      </p>
     </div>
   );
 }

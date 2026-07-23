@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { createClient } from "@/lib/supabase/client";
-import { Card, CardContent } from "@/components/ui/card";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 
 type Commenter = {
   id: string;
@@ -68,60 +68,55 @@ export function LiveViewersPanel({
   }, [liveId]);
 
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-foreground">Spectateurs</p>
-          <span className="text-xs text-muted-foreground">
-            {viewerCount !== null ? `${viewerCount} présents` : "—"}
-          </span>
-        </div>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-foreground">Spectateurs</p>
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {viewerCount !== null ? `${viewerCount} présents` : "—"}
+        </span>
+      </div>
 
-        <div>
-          <p className="text-xs text-muted-foreground">
-            Actifs ({commenters.length})
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Actifs ({commenters.length})
+        </p>
+        {commenters.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Personne n&apos;a encore commenté.
           </p>
-          {commenters.length === 0 ? (
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              Personne n&apos;a encore commenté.
-            </p>
-          ) : (
-            <ul className="mt-1.5 flex flex-col gap-2">
-              <AnimatePresence initial={false}>
-                {commenters.map((commenter) => (
-                  <motion.li
-                    key={commenter.id}
-                    layout
-                    {...listItemMotion}
-                    className="flex items-center gap-2 list-none"
-                  >
-                    {commenter.profile_picture_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- avatars TikTok externes, non optimisables par next/image
-                      <img
-                        src={commenter.profile_picture_url}
-                        alt={commenter.tiktok_username}
-                        className="size-8 shrink-0 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">
-                        {commenter.tiktok_username.slice(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="truncate text-sm text-foreground">
-                        {commenter.nickname || commenter.tiktok_username}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        @{commenter.tiktok_username}
-                      </p>
-                    </div>
-                  </motion.li>
-                ))}
-              </AnimatePresence>
-            </ul>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+        ) : (
+          <ul className="mt-2 flex flex-col gap-2">
+            <AnimatePresence initial={false}>
+              {commenters.map((commenter) => (
+                <motion.li
+                  key={commenter.id}
+                  layout
+                  {...listItemMotion}
+                  className="flex items-center gap-2 list-none"
+                >
+                  <Avatar>
+                    <AvatarImage
+                      src={commenter.profile_picture_url ?? undefined}
+                      alt={commenter.tiktok_username}
+                    />
+                    <AvatarFallback>
+                      {commenter.tiktok_username.slice(0, 2).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-foreground">
+                      {commenter.nickname || commenter.tiktok_username}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      @{commenter.tiktok_username}
+                    </p>
+                  </div>
+                </motion.li>
+              ))}
+            </AnimatePresence>
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
