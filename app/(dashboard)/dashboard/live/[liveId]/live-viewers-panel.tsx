@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+
+const WORKER_STALE_MS = 60_000;
+
+function isWorkerActive(workerId: string | null, heartbeatAt: string | null): boolean {
+  return (
+    !!workerId && !!heartbeatAt && Date.now() - new Date(heartbeatAt).getTime() <= WORKER_STALE_MS
+  );
+}
 
 type Commenter = {
   id: string;
@@ -24,13 +33,30 @@ export function LiveViewersPanel({
   liveId,
   initialCommenters,
   initialViewerCount,
+  initialWorkerId,
+  initialHeartbeatAt,
 }: {
   liveId: string;
   initialCommenters: Commenter[];
   initialViewerCount: number | null;
+  initialWorkerId: string | null;
+  initialHeartbeatAt: string | null;
 }) {
   const [commenters, setCommenters] = useState(initialCommenters);
   const [viewerCount, setViewerCount] = useState(initialViewerCount);
+  const [workerId, setWorkerId] = useState(initialWorkerId);
+  const [heartbeatAt, setHeartbeatAt] = useState(initialHeartbeatAt);
+  const isActive = isWorkerActive(workerId, heartbeatAt);
+
+  // isActive dépend de Date.now(), donc il devient obsolète avec le temps
+  // même sans nouvel événement Realtime (ex. le worker plante sans jamais
+  // renvoyer d'UPDATE) — force un nouveau rendu périodique pour le
+  // réévaluer, plutôt que de dupliquer sa valeur dans un state séparé.
+  const [, forceRerender] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => forceRerender((n) => n + 1), 5_000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const supabase = createClient();
@@ -56,8 +82,14 @@ export function LiveViewersPanel({
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "lives", filter: `id=eq.${liveId}` },
         (payload) => {
-          const next = (payload.new as { viewer_count: number | null }).viewer_count;
-          setViewerCount(next);
+          const next = payload.new as {
+            viewer_count: number | null;
+            worker_id: string | null;
+            heartbeat_at: string | null;
+          };
+          setViewerCount(next.viewer_count);
+          setWorkerId(next.worker_id);
+          setHeartbeatAt(next.heartbeat_at);
         }
       )
       .subscribe();
@@ -71,10 +103,20 @@ export function LiveViewersPanel({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-foreground">Spectateurs</p>
-        <span className="text-xs tabular-nums text-muted-foreground">
-          {viewerCount !== null ? `${viewerCount} présents` : "—"}
-        </span>
+        <Badge variant={isActive ? "success" : "warning"} className="gap-1.5">
+          <span
+            className={
+              isActive
+                ? "size-1.5 rounded-full bg-success-foreground"
+                : "size-1.5 rounded-full bg-warning-foreground"
+            }
+          />
+          {isActive ? "Live actif sur le worker" : "Worker inactif"}
+        </Badge>
       </div>
+      <span className="-mt-1.5 text-xs tabular-nums text-muted-foreground">
+        {viewerCount !== null ? `${viewerCount} présents` : "—"}
+      </span>
 
       <div>
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

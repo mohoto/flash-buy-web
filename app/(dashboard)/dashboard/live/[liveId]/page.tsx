@@ -130,6 +130,8 @@ export default async function LiveConsolePage({
               liveId={liveId}
               initialCommenters={commenters ?? []}
               initialViewerCount={live.viewer_count}
+              initialWorkerId={live.worker_id}
+              initialHeartbeatAt={live.heartbeat_at}
             />
           </FramePanel>
         </Frame>
