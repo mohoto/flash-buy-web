@@ -439,6 +439,7 @@ export type Database = {
           started_at: string | null
           status: Database["public"]["Enums"]["live_status"]
           tiktok_room_id: string | null
+          tiktok_username: string | null
           viewer_count: number | null
           worker_id: string | null
         }
@@ -454,6 +455,7 @@ export type Database = {
           started_at?: string | null
           status?: Database["public"]["Enums"]["live_status"]
           tiktok_room_id?: string | null
+          tiktok_username?: string | null
           viewer_count?: number | null
           worker_id?: string | null
         }
@@ -469,6 +471,7 @@ export type Database = {
           started_at?: string | null
           status?: Database["public"]["Enums"]["live_status"]
           tiktok_room_id?: string | null
+          tiktok_username?: string | null
           viewer_count?: number | null
           worker_id?: string | null
         }

@@ -31,25 +31,19 @@ export async function startLiveSession(
   onEnded: (liveId: string) => void,
   onWsOpenFailure: (liveId: string, err: Error) => void
 ): Promise<LiveSession> {
-  const { data: shop } = await supabase
-    .from("shops")
-    .select("tiktok_username")
-    .eq("id", shopId)
-    .single();
-
-  const tiktokUsername = shop?.tiktok_username;
-  if (!tiktokUsername) {
-    throw new Error(`Shop ${shopId} has no tiktok_username configured`);
-  }
-
-  // Mots-clés figés au démarrage de la session : un changement fait depuis la
-  // console live pendant que le live tourne ne s'appliquera qu'à la prochaine
-  // connexion (pas de relecture par commentaire).
+  // Pseudo TikTok et mots-clés figés au démarrage de la session : un
+  // changement fait depuis la console live pendant que le live tourne ne
+  // s'appliquera qu'à la prochaine connexion (pas de relecture par commentaire).
   const { data: liveRow } = await supabase
     .from("lives")
-    .select("sale_keywords")
+    .select("tiktok_username, sale_keywords")
     .eq("id", liveId)
     .single();
+
+  const tiktokUsername = liveRow?.tiktok_username;
+  if (!tiktokUsername) {
+    throw new Error(`Live ${liveId} has no tiktok_username configured`);
+  }
   const saleKeywords = liveRow?.sale_keywords;
 
   const session: LiveSession = {
@@ -62,7 +56,8 @@ export async function startLiveSession(
   session.connection = connectToLive(tiktokUsername, {
     onComment: (comment) => handleComment(liveId, shopId, comment, saleKeywords),
     onViewerCount: (viewerCount) => handleViewerCount(liveId, viewerCount),
-    onDisconnect: async () => {
+    onDisconnect: async (reason) => {
+      console.log(JSON.stringify({ level: "info", msg: "live session disconnect", liveId, tiktokUsername, reason }));
       await supabase
         .from("lives")
         .update({ status: "ended", ended_at: new Date().toISOString() })

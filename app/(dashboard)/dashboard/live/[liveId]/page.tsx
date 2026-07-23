@@ -21,7 +21,9 @@ export default async function LiveConsolePage({
 
   const { data: live } = await supabase
     .from("lives")
-    .select("id, status, started_at, sale_keywords, worker_id, heartbeat_at, viewer_count")
+    .select(
+      "id, status, started_at, sale_keywords, tiktok_username, worker_id, heartbeat_at, viewer_count"
+    )
     .eq("id", liveId)
     .eq("shop_id", shop.id)
     .single();
@@ -114,12 +116,12 @@ export default async function LiveConsolePage({
 
         <Frame className="h-fit">
           <FramePanel>
-            <TiktokPanel tiktokUsername={shop.tiktok_username} />
+            <TiktokPanel tiktokUsername={live.tiktok_username} />
           </FramePanel>
           <FramePanel>
             <LiveConnectionSettings
               liveId={liveId}
-              tiktokUsername={shop.tiktok_username}
+              tiktokUsername={live.tiktok_username}
               saleKeywords={live.sale_keywords}
               workerId={live.worker_id}
               heartbeatAt={live.heartbeat_at}
