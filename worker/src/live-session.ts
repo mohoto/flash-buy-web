@@ -125,15 +125,6 @@ async function handleComment(
 
   const catalog = getCatalog(shopId);
   const parsed = parseSaleComment(comment.text, catalog, saleKeywords);
-  console.log(JSON.stringify({
-    level: "info",
-    msg: "comment parsed",
-    liveId,
-    saleKeywords,
-    rawText: comment.text,
-    isSale: parsed.isSale,
-    matched: parsed.matched,
-  }));
   if (!parsed.isSale) return;
 
   const buyerTiktokUsername = comment.username;
