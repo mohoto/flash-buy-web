@@ -25,9 +25,47 @@ function clearDebounceState(liveId: string) {
   }
 }
 
+// Flux éphémère de TOUS les commentaires (pas seulement ceux avec le mot-clé
+// de vente) : diffusé en Realtime broadcast, jamais écrit en base — sinon un
+// live très commenté saturerait la DB en écritures. Un onglet non ouvert au
+// moment d'un commentaire le manque simplement, par design.
+const commentChannels = new Map<string, ReturnType<typeof supabase.channel>>();
+
+function getCommentChannel(liveId: string) {
+  let channel = commentChannels.get(liveId);
+  if (!channel) {
+    channel = supabase.channel(`live-comments-${liveId}`);
+    channel.subscribe();
+    commentChannels.set(liveId, channel);
+  }
+  return channel;
+}
+
+function broadcastComment(liveId: string, comment: LiveComment) {
+  getCommentChannel(liveId).send({
+    type: "broadcast",
+    event: "comment",
+    payload: {
+      username: comment.username,
+      nickname: comment.nickname,
+      profilePictureUrl: comment.profilePictureUrl,
+      text: comment.text,
+      createdAt: new Date().toISOString(),
+    },
+  });
+}
+
+function closeCommentChannel(liveId: string) {
+  const channel = commentChannels.get(liveId);
+  if (!channel) return;
+  supabase.removeChannel(channel);
+  commentChannels.delete(liveId);
+}
+
 export async function startLiveSession(
   liveId: string,
   shopId: string,
+  mode: string,
   onEnded: (liveId: string) => void,
   onWsOpenFailure: (liveId: string, err: Error) => void
 ): Promise<LiveSession> {
@@ -54,7 +92,7 @@ export async function startLiveSession(
   };
 
   session.connection = connectToLive(tiktokUsername, {
-    onComment: (comment) => handleComment(liveId, shopId, comment, saleKeywords),
+    onComment: (comment) => handleComment(liveId, shopId, mode, comment, saleKeywords),
     onViewerCount: (viewerCount) => handleViewerCount(liveId, viewerCount),
     onDisconnect: async (reason) => {
       console.log(JSON.stringify({ level: "info", msg: "live session disconnect", liveId, tiktokUsername, reason }));
@@ -64,6 +102,7 @@ export async function startLiveSession(
         .eq("id", liveId);
       await supabase.from("live_viewers").delete().eq("live_id", liveId);
       clearDebounceState(liveId);
+      closeCommentChannel(liveId);
       onEnded(liveId);
     },
     onError: (err) => {
@@ -113,12 +152,17 @@ async function trackActiveCommenter(liveId: string, comment: LiveComment) {
 async function handleComment(
   liveId: string,
   shopId: string,
+  mode: string,
   comment: LiveComment,
   saleKeywords?: string[]
 ) {
+  broadcastComment(liveId, comment);
   await trackActiveCommenter(liveId, comment);
 
-  const catalog = getCatalog(shopId);
+  // Mode "freeform" : pas de matching produit, le vendeur associe le
+  // commentaire à un produit après coup (comme le flux "non reconnu"
+  // existant en mode catalog) — catalogue vide, jamais getCatalog(shopId).
+  const catalog = mode === "catalog" ? getCatalog(shopId) : [];
   const parsed = parseSaleComment(comment.text, catalog, saleKeywords);
   console.log(JSON.stringify({
     level: "info",

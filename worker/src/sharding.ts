@@ -20,10 +20,10 @@ export function canClaimMore(currentLiveCount: number): boolean {
 }
 
 // Claim atomique : une seule instance gagne, sans coordinateur central.
-export async function claimNextLive(): Promise<{ id: string; shop_id: string } | null> {
+export async function claimNextLive(): Promise<{ id: string; shop_id: string; mode: string } | null> {
   const { data: candidates } = await supabase
     .from("lives")
-    .select("id, shop_id")
+    .select("id, shop_id, mode")
     .is("worker_id", null)
     .eq("status", "live")
     .order("created_at", { ascending: true })
@@ -37,7 +37,7 @@ export async function claimNextLive(): Promise<{ id: string; shop_id: string } |
       .update({ worker_id: config.workerId, claimed_at: new Date().toISOString() })
       .eq("id", candidate.id)
       .is("worker_id", null) // condition atomique : gagne uniquement si encore libre
-      .select("id, shop_id")
+      .select("id, shop_id, mode")
       .maybeSingle();
 
     if (!error && data) return data;

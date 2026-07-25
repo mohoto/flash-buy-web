@@ -434,6 +434,7 @@ export type Database = {
           euler_alert_id: string | null
           heartbeat_at: string | null
           id: string
+          mode: string
           sale_keywords: string[]
           shop_id: string
           started_at: string | null
@@ -450,6 +451,7 @@ export type Database = {
           euler_alert_id?: string | null
           heartbeat_at?: string | null
           id?: string
+          mode?: string
           sale_keywords?: string[]
           shop_id: string
           started_at?: string | null
@@ -466,6 +468,7 @@ export type Database = {
           euler_alert_id?: string | null
           heartbeat_at?: string | null
           id?: string
+          mode?: string
           sale_keywords?: string[]
           shop_id?: string
           started_at?: string | null

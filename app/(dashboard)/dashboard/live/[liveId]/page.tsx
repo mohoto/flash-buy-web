@@ -3,12 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { getOwnShop } from "@/lib/dashboard/get-own-shop";
 import { LiveConsoleClient } from "./live-console-client";
 import { LiveBadge } from "./live-badge";
-import { TiktokPanel } from "./tiktok-panel";
-import { LiveConnectionSettings } from "./live-connection-settings";
+import { ConnectionStatusBadge, LiveConnectionForm } from "./live-connection-settings";
 import { LiveViewersPanel } from "./live-viewers-panel";
 import { endLive } from "../../lives/actions";
 import { Button } from "@/components/ui/button";
-import { Frame, FramePanel } from "@/components/ui/frame";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 
 export default async function LiveConsolePage({
   params,
@@ -22,7 +22,7 @@ export default async function LiveConsolePage({
   const { data: live } = await supabase
     .from("lives")
     .select(
-      "id, status, started_at, sale_keywords, tiktok_username, worker_id, heartbeat_at, viewer_count"
+      "id, status, started_at, sale_keywords, tiktok_username, mode, worker_id, heartbeat_at, viewer_count"
     )
     .eq("id", liveId)
     .eq("shop_id", shop.id)
@@ -73,82 +73,96 @@ export default async function LiveConsolePage({
     .filter((o) => o.status === "validated")
     .reduce((sum, o) => sum + o.total_cents, 0);
 
+  const isScheduled = live.status === "scheduled";
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h1 className="font-heading text-2xl font-semibold text-foreground">
             Console Live
           </h1>
           {live.status === "live" && <LiveBadge />}
+          {!isScheduled && (
+            <ConnectionStatusBadge
+              liveId={liveId}
+              workerId={live.worker_id}
+              heartbeatAt={live.heartbeat_at}
+            />
+          )}
         </div>
-        {live.status === "live" && (
+        {(live.status === "live" || isScheduled) && (
           <form action={endLive.bind(null, liveId)}>
             <Button type="submit" variant="destructive-outline">
-              Terminer le live
+              {live.status === "live" ? "Terminer le live" : "Annuler"}
             </Button>
           </form>
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <StatCard
-          label="Commandes en attente"
-          value={String(pendingCount)}
-        />
-        <StatCard
-          label="Total validé"
-          value={`${(validatedTotalCents / 100).toFixed(2)} €`}
-        />
-        <StatCard
-          label="Spectateurs"
-          value={live.viewer_count !== null ? String(live.viewer_count) : "—"}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
-        <LiveConsoleClient
-          liveId={liveId}
-          initialOrders={initialOrders}
-          products={productOptions}
-          saleKeywords={live.sale_keywords}
-        />
-
-        <Frame className="h-fit">
-          <FramePanel>
-            <TiktokPanel tiktokUsername={live.tiktok_username} />
-          </FramePanel>
-          <FramePanel>
-            <LiveConnectionSettings
+      {isScheduled ? (
+        <Card className="mx-auto w-full max-w-lg">
+          <CardHeader>
+            <CardTitle>Connexion TikTok LIVE</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <LiveConnectionForm
               liveId={liveId}
               tiktokUsername={live.tiktok_username}
               saleKeywords={live.sale_keywords}
-              workerId={live.worker_id}
-              heartbeatAt={live.heartbeat_at}
+              mode={live.mode}
             />
-          </FramePanel>
-          <FramePanel>
-            <LiveViewersPanel
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <Card>
+            <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-3 py-4">
+              <Stat label="Commandes en attente" value={String(pendingCount)} />
+              <Separator orientation="vertical" className="hidden h-8 sm:block" />
+              <Stat label="Total validé" value={`${(validatedTotalCents / 100).toFixed(2)} €`} />
+              <Separator orientation="vertical" className="hidden h-8 sm:block" />
+              <Stat
+                label="Spectateurs"
+                value={live.viewer_count !== null ? String(live.viewer_count) : "—"}
+              />
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_300px]">
+            <LiveConsoleClient
               liveId={liveId}
-              initialCommenters={commenters ?? []}
-              initialViewerCount={live.viewer_count}
-              initialWorkerId={live.worker_id}
-              initialHeartbeatAt={live.heartbeat_at}
+              initialOrders={initialOrders}
+              products={productOptions}
+              saleKeywords={live.sale_keywords}
+              commenters={commenters ?? []}
             />
-          </FramePanel>
-        </Frame>
-      </div>
+
+            <Card className="h-fit">
+              <CardContent>
+                <LiveViewersPanel
+                  liveId={liveId}
+                  initialCommenters={commenters ?? []}
+                  initialViewerCount={live.viewer_count}
+                  initialWorkerId={live.worker_id}
+                  initialHeartbeatAt={live.heartbeat_at}
+                />
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border bg-card px-4 py-3 shadow-xs/5">
+    <div>
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
-      <p className="mt-1 font-heading text-2xl font-semibold tabular-nums text-foreground">
+      <p className="font-heading text-xl font-semibold tabular-nums text-foreground">
         {value}
       </p>
     </div>

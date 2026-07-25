@@ -17,6 +17,10 @@ import { startSimulationServer } from "./simulation-server.js";
 assertConfig();
 
 const activeSessions = new Map<string, LiveSession>();
+// Mode du live gardé côté worker (pas dans LiveSession) : sert uniquement à
+// savoir, à la fin de la session, si trackShop a été appelé pour elle — pour
+// ne jamais untrackShop un shop qui n'a jamais été tracké (mode "freeform").
+const sessionModes = new Map<string, string>();
 let wsOpenFailuresTotal = 0;
 let shuttingDown = false;
 
@@ -28,7 +32,8 @@ async function onLiveEnded(liveId: string) {
   const session = activeSessions.get(liveId);
   if (!session) return;
   activeSessions.delete(liveId);
-  untrackShop(session.shopId);
+  if (sessionModes.get(liveId) === "catalog") untrackShop(session.shopId);
+  sessionModes.delete(liveId);
   await releaseLive(liveId);
   log("info", "live session ended", { liveId });
 }
@@ -50,22 +55,28 @@ async function claimLoop() {
   if (canClaimMore(activeSessions.size)) {
     const claimed = await claimNextLive();
     if (claimed) {
+      sessionModes.set(claimed.id, claimed.mode);
       try {
-        await trackShop(claimed.shop_id);
+        // Mode "freeform" : le worker ne charge jamais le catalogue de ce
+        // vendeur en mémoire pour ce live (cf. handleComment côté
+        // live-session.ts, qui ignore getCatalog dans ce mode).
+        if (claimed.mode === "catalog") await trackShop(claimed.shop_id);
         const session = await startLiveSession(
           claimed.id,
           claimed.shop_id,
+          claimed.mode,
           onLiveEnded,
           onWsOpenFailure
         );
         activeSessions.set(claimed.id, session);
-        log("info", "claimed live", { liveId: claimed.id, shopId: claimed.shop_id });
+        log("info", "claimed live", { liveId: claimed.id, shopId: claimed.shop_id, mode: claimed.mode });
       } catch (err) {
         log("error", "failed to start live session, releasing", {
           liveId: claimed.id,
           error: (err as Error).message,
         });
-        untrackShop(claimed.shop_id);
+        if (claimed.mode === "catalog") untrackShop(claimed.shop_id);
+        sessionModes.delete(claimed.id);
         await releaseLive(claimed.id);
       }
     }

@@ -5,18 +5,36 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOwnShop } from "@/lib/dashboard/get-own-shop";
 
-// Démarrage manuel côté dashboard (le webhook Euler LIVE Alert fera la même
-// chose automatiquement à l'étape 5, une fois le worker branché).
+// Crée le live en "scheduled", pas encore "live" : le worker ne le réclame
+// que sur status = 'live' (cf. worker/src/sharding.ts claimNextLive), ce qui
+// laisse le temps d'ajuster pseudo TikTok / mots-clés depuis la console live
+// avant que le worker ouvre une connexion Euler avec les réglages définitifs.
 export async function startLive() {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
-  // Reprend les mots-clés de vente de la dernière live du vendeur : évite de
-  // devoir les ressaisir à chaque nouvelle session (sale_keywords est stocké
-  // par live, pas par shop, cf. migration add_lives_sale_keywords).
+  // Réutilise une live en attente/en cours plutôt que d'en recréer une : sinon
+  // plusieurs lives actives pour le même shop finissent chacune réclamée par
+  // le worker, qui ouvre alors plusieurs connexions Euler concurrentes vers le
+  // même compte TikTok (cf. garde équivalente côté webhook Euler Alert).
+  const { data: existing } = await supabase
+    .from("lives")
+    .select("id")
+    .eq("shop_id", shop.id)
+    .in("status", ["scheduled", "live"])
+    .maybeSingle();
+
+  if (existing) {
+    redirect(`/dashboard/live/${existing.id}`);
+  }
+
+  // Reprend le pseudo TikTok, les mots-clés de vente et le mode de la
+  // dernière live du vendeur : évite de devoir les ressaisir à chaque
+  // nouvelle session (stockés par live, pas par shop, cf. migration
+  // add_lives_sale_keywords / add_lives_mode).
   const { data: lastLive } = await supabase
     .from("lives")
-    .select("sale_keywords")
+    .select("tiktok_username, sale_keywords, mode")
     .eq("shop_id", shop.id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -26,9 +44,9 @@ export async function startLive() {
     .from("lives")
     .insert({
       shop_id: shop.id,
-      status: "live",
-      started_at: new Date().toISOString(),
-      tiktok_username: shop.tiktok_username,
+      status: "scheduled",
+      tiktok_username: lastLive?.tiktok_username ?? shop.tiktok_username,
+      mode: lastLive?.mode ?? "catalog",
       ...(lastLive?.sale_keywords ? { sale_keywords: lastLive.sale_keywords } : {}),
     })
     .select("id")

@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { createClient } from "@/lib/supabase/client";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { StatusBadge } from "./status-badge";
 
 const WORKER_STALE_MS = 60_000;
 
@@ -103,16 +104,9 @@ export function LiveViewersPanel({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-foreground">Spectateurs</p>
-        <Badge variant={isActive ? "success" : "warning"} className="gap-1.5">
-          <span
-            className={
-              isActive
-                ? "size-1.5 rounded-full bg-success-foreground"
-                : "size-1.5 rounded-full bg-warning-foreground"
-            }
-          />
+        <StatusBadge variant={isActive ? "success" : "error"}>
           {isActive ? "Live actif sur le worker" : "Worker inactif"}
-        </Badge>
+        </StatusBadge>
       </div>
       <span className="-mt-1.5 text-xs tabular-nums text-muted-foreground">
         {viewerCount !== null ? `${viewerCount} présents` : "—"}
@@ -127,36 +121,38 @@ export function LiveViewersPanel({
             Personne n&apos;a encore commenté.
           </p>
         ) : (
-          <ul className="mt-2 flex flex-col gap-2">
-            <AnimatePresence initial={false}>
-              {commenters.map((commenter) => (
-                <motion.li
-                  key={commenter.id}
-                  layout
-                  {...listItemMotion}
-                  className="flex items-center gap-2 list-none"
-                >
-                  <Avatar>
-                    <AvatarImage
-                      src={commenter.profile_picture_url ?? undefined}
-                      alt={commenter.tiktok_username}
-                    />
-                    <AvatarFallback>
-                      {commenter.tiktok_username.slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm text-foreground">
-                      {commenter.nickname || commenter.tiktok_username}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      @{commenter.tiktok_username}
-                    </p>
-                  </div>
-                </motion.li>
-              ))}
-            </AnimatePresence>
-          </ul>
+          <ScrollArea className="mt-2 max-h-72" scrollFade>
+            <ul className="flex flex-col gap-2 pr-1">
+              <AnimatePresence initial={false}>
+                {commenters.map((commenter) => (
+                  <motion.li
+                    key={commenter.id}
+                    layout
+                    {...listItemMotion}
+                    className="flex items-center gap-2 list-none"
+                  >
+                    <Avatar>
+                      <AvatarImage
+                        src={commenter.profile_picture_url ?? undefined}
+                        alt={commenter.tiktok_username}
+                      />
+                      <AvatarFallback>
+                        {commenter.tiktok_username.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-foreground">
+                        {commenter.nickname || commenter.tiktok_username}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        @{commenter.tiktok_username}
+                      </p>
+                    </div>
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+            </ul>
+          </ScrollArea>
         )}
       </div>
     </div>

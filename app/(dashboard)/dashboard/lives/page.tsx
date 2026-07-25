@@ -1,12 +1,21 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getOwnShop } from "@/lib/dashboard/get-own-shop";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { startLive } from "./actions";
 
 const STATUS_LABEL: Record<string, string> = {
   scheduled: "Programmé",
   live: "En direct",
   ended: "Terminé",
+};
+
+const STATUS_VARIANT: Record<string, "success" | "secondary" | "outline"> = {
+  live: "success",
+  scheduled: "outline",
+  ended: "secondary",
 };
 
 export default async function LivesPage() {
@@ -19,53 +28,42 @@ export default async function LivesPage() {
     .eq("shop_id", shop.id)
     .order("created_at", { ascending: false });
 
-  const activeLive = (lives ?? []).find((l) => l.status === "live");
+  const activeLive = (lives ?? []).find(
+    (l) => l.status === "live" || l.status === "scheduled"
+  );
 
   return (
     <div>
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
-          Lives
-        </h1>
+        <h1 className="text-2xl font-semibold text-foreground">Lives</h1>
         {activeLive ? (
-          <Link
-            href={`/dashboard/live/${activeLive.id}`}
-            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-          >
-            Rejoindre le live en cours
-          </Link>
+          <Button render={<Link href={`/dashboard/live/${activeLive.id}`} />}>
+            {activeLive.status === "live" ? "Rejoindre le live en cours" : "Reprendre le live programmé"}
+          </Button>
         ) : (
           <form action={startLive}>
-            <button
-              type="submit"
-              className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950"
-            >
-              Démarrer un live
-            </button>
+            <Button type="submit">Démarrer un live</Button>
           </form>
         )}
       </div>
 
-      <ul className="mt-6 flex flex-col gap-2">
+      <div className="mt-6 flex flex-col gap-2">
         {(lives ?? []).map((live) => (
-          <li key={live.id}>
-            <Link
-              href={`/dashboard/live/${live.id}`}
-              className="flex items-center justify-between rounded-md border border-zinc-200 px-4 py-3 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            >
-              <span className="text-zinc-950 dark:text-zinc-50">
+          <Card key={live.id} render={<Link href={`/dashboard/live/${live.id}`} />} className="hover:border-primary/50">
+            <div className="flex items-center justify-between px-4 py-3">
+              <span className="text-sm text-foreground">
                 {new Date(live.created_at).toLocaleString("fr-FR")}
               </span>
-              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+              <Badge variant={STATUS_VARIANT[live.status] ?? "outline"}>
                 {STATUS_LABEL[live.status] ?? live.status}
-              </span>
-            </Link>
-          </li>
+              </Badge>
+            </div>
+          </Card>
         ))}
         {(lives ?? []).length === 0 && (
-          <li className="text-sm text-zinc-500">Aucun live pour l&apos;instant.</li>
+          <p className="text-sm text-muted-foreground">Aucun live pour l&apos;instant.</p>
         )}
-      </ul>
+      </div>
     </div>
   );
 }

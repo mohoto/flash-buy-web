@@ -5,45 +5,40 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service-role";
 import { getOwnShop } from "@/lib/dashboard/get-own-shop";
 
-// Le pseudo TikTok peut changer d'un live à l'autre (compte différent, event
-// ponctuel…) : réglage par live (lives.tiktok_username), distinct du réglage
-// global sur /dashboard/settings (shops.tiktok_username).
-export async function updateLiveTiktokUsername(liveId: string, formData: FormData) {
+// Enregistre pseudo TikTok + mots-clés puis bascule "scheduled" -> "live" en
+// un seul submit : le worker ne réclame un live que sur status = 'live' (cf.
+// worker/src/sharding.ts claimNextLive), donc c'est seulement à ce moment
+// qu'il ouvre la connexion Euler, avec les réglages définitifs déjà en base.
+export async function saveConnectionAndStart(liveId: string, formData: FormData) {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
   const tiktokUsername = String(formData.get("tiktok_username") ?? "").trim();
 
-  await supabase
-    .from("lives")
-    .update({ tiktok_username: tiktokUsername || null })
-    .eq("id", liveId)
-    .eq("shop_id", shop.id);
-
-  revalidatePath(`/dashboard/live/${liveId}`);
-}
-
-// Mots-clés de vente reconnus par le worker pour CE live (ex. "sold, vendu,
-// jprends"), au lieu du tableau en dur côté worker/src/parsing.ts.
-export async function updateLiveSaleKeywords(liveId: string, formData: FormData) {
-  const shop = await getOwnShop();
-  const supabase = await createClient();
-
-  const raw = String(formData.get("sale_keywords") ?? "");
+  const rawKeywords = String(formData.get("sale_keywords") ?? "");
   const keywords = [
     ...new Set(
-      raw
+      rawKeywords
         .split(",")
         .map((k) => k.trim().toLowerCase())
         .filter(Boolean)
     ),
   ];
 
+  const mode = formData.get("mode") === "freeform" ? "freeform" : "catalog";
+
   await supabase
     .from("lives")
-    .update({ sale_keywords: keywords.length > 0 ? keywords : ["sold", "vendu"] })
+    .update({
+      tiktok_username: tiktokUsername || null,
+      sale_keywords: keywords.length > 0 ? keywords : ["sold", "vendu"],
+      mode,
+      status: "live",
+      started_at: new Date().toISOString(),
+    })
     .eq("id", liveId)
-    .eq("shop_id", shop.id);
+    .eq("shop_id", shop.id)
+    .eq("status", "scheduled");
 
   revalidatePath(`/dashboard/live/${liveId}`);
 }
