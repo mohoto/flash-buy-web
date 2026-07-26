@@ -244,6 +244,106 @@ export type Database = {
           },
         ]
       }
+      live_buyer_shipping_info: {
+        Row: {
+          address: string
+          buyer_tiktok_username: string
+          city: string
+          country: string
+          created_at: string
+          email: string
+          first_name: string
+          id: string
+          last_name: string
+          phone: string
+          postal_code: string
+          shop_id: string
+          updated_at: string
+        }
+        Insert: {
+          address: string
+          buyer_tiktok_username: string
+          city: string
+          country: string
+          created_at?: string
+          email: string
+          first_name: string
+          id?: string
+          last_name: string
+          phone: string
+          postal_code: string
+          shop_id: string
+          updated_at?: string
+        }
+        Update: {
+          address?: string
+          buyer_tiktok_username?: string
+          city?: string
+          country?: string
+          created_at?: string
+          email?: string
+          first_name?: string
+          id?: string
+          last_name?: string
+          phone?: string
+          postal_code?: string
+          shop_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_buyer_shipping_info_shop_id_fkey"
+            columns: ["shop_id"]
+            isOneToOne: false
+            referencedRelation: "shops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      live_freeform_comments: {
+        Row: {
+          added_to_cart_at: string | null
+          buyer_tiktok_username: string
+          created_at: string
+          id: string
+          live_id: string
+          nickname: string | null
+          profile_picture_url: string | null
+          text: string
+          tiktok_comment_id: string | null
+        }
+        Insert: {
+          added_to_cart_at?: string | null
+          buyer_tiktok_username: string
+          created_at?: string
+          id?: string
+          live_id: string
+          nickname?: string | null
+          profile_picture_url?: string | null
+          text: string
+          tiktok_comment_id?: string | null
+        }
+        Update: {
+          added_to_cart_at?: string | null
+          buyer_tiktok_username?: string
+          created_at?: string
+          id?: string
+          live_id?: string
+          nickname?: string | null
+          profile_picture_url?: string | null
+          text?: string
+          tiktok_comment_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_freeform_comments_live_id_fkey"
+            columns: ["live_id"]
+            isOneToOne: false
+            referencedRelation: "lives"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       live_order_items: {
         Row: {
           created_at: string
@@ -388,6 +488,162 @@ export type Database = {
           },
         ]
       }
+      live_products: {
+        Row: {
+          created_at: string
+          has_color: boolean
+          has_size: boolean
+          id: string
+          internal_ref: string
+          live_id: string
+          name: string
+          price_cents: number
+          retired_at: string | null
+          shop_id: string
+        }
+        Insert: {
+          created_at?: string
+          has_color?: boolean
+          has_size?: boolean
+          id?: string
+          internal_ref: string
+          live_id: string
+          name: string
+          price_cents: number
+          retired_at?: string | null
+          shop_id: string
+        }
+        Update: {
+          created_at?: string
+          has_color?: boolean
+          has_size?: boolean
+          id?: string
+          internal_ref?: string
+          live_id?: string
+          name?: string
+          price_cents?: number
+          retired_at?: string | null
+          shop_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_products_live_id_fkey"
+            columns: ["live_id"]
+            isOneToOne: false
+            referencedRelation: "lives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_products_shop_id_fkey"
+            columns: ["shop_id"]
+            isOneToOne: false
+            referencedRelation: "shops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      live_rapid_items: {
+        Row: {
+          buyer_tiktok_username: string
+          created_at: string
+          id: string
+          live_id: string
+          live_order_id: string | null
+          live_order_item_id: string | null
+          live_product_id: string | null
+          nickname: string | null
+          profile_picture_url: string | null
+          quantity: number
+          raw_color_text: string | null
+          raw_size_text: string | null
+          received_at: string
+          resolution_reason: string | null
+          resolution_state: Database["public"]["Enums"]["rapid_resolution_state"]
+          resolved_at: string | null
+          shop_id: string
+          source_comment: string
+          tiktok_comment_id: string | null
+        }
+        Insert: {
+          buyer_tiktok_username: string
+          created_at?: string
+          id?: string
+          live_id: string
+          live_order_id?: string | null
+          live_order_item_id?: string | null
+          live_product_id?: string | null
+          nickname?: string | null
+          profile_picture_url?: string | null
+          quantity?: number
+          raw_color_text?: string | null
+          raw_size_text?: string | null
+          received_at?: string
+          resolution_reason?: string | null
+          resolution_state?: Database["public"]["Enums"]["rapid_resolution_state"]
+          resolved_at?: string | null
+          shop_id: string
+          source_comment: string
+          tiktok_comment_id?: string | null
+        }
+        Update: {
+          buyer_tiktok_username?: string
+          created_at?: string
+          id?: string
+          live_id?: string
+          live_order_id?: string | null
+          live_order_item_id?: string | null
+          live_product_id?: string | null
+          nickname?: string | null
+          profile_picture_url?: string | null
+          quantity?: number
+          raw_color_text?: string | null
+          raw_size_text?: string | null
+          received_at?: string
+          resolution_reason?: string | null
+          resolution_state?: Database["public"]["Enums"]["rapid_resolution_state"]
+          resolved_at?: string | null
+          shop_id?: string
+          source_comment?: string
+          tiktok_comment_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_rapid_items_live_id_fkey"
+            columns: ["live_id"]
+            isOneToOne: false
+            referencedRelation: "lives"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_rapid_items_live_order_id_fkey"
+            columns: ["live_order_id"]
+            isOneToOne: false
+            referencedRelation: "live_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_rapid_items_live_order_item_id_fkey"
+            columns: ["live_order_item_id"]
+            isOneToOne: false
+            referencedRelation: "live_order_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_rapid_items_live_product_id_fkey"
+            columns: ["live_product_id"]
+            isOneToOne: false
+            referencedRelation: "live_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_rapid_items_shop_id_fkey"
+            columns: ["shop_id"]
+            isOneToOne: false
+            referencedRelation: "shops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       live_viewers: {
         Row: {
           id: string
@@ -428,6 +684,7 @@ export type Database = {
       }
       lives: {
         Row: {
+          active_product_id: string | null
           claimed_at: string | null
           created_at: string
           ended_at: string | null
@@ -435,6 +692,7 @@ export type Database = {
           heartbeat_at: string | null
           id: string
           mode: string
+          rapid_product_seq: number
           sale_keywords: string[]
           shop_id: string
           started_at: string | null
@@ -445,6 +703,7 @@ export type Database = {
           worker_id: string | null
         }
         Insert: {
+          active_product_id?: string | null
           claimed_at?: string | null
           created_at?: string
           ended_at?: string | null
@@ -452,6 +711,7 @@ export type Database = {
           heartbeat_at?: string | null
           id?: string
           mode?: string
+          rapid_product_seq?: number
           sale_keywords?: string[]
           shop_id: string
           started_at?: string | null
@@ -462,6 +722,7 @@ export type Database = {
           worker_id?: string | null
         }
         Update: {
+          active_product_id?: string | null
           claimed_at?: string | null
           created_at?: string
           ended_at?: string | null
@@ -469,6 +730,7 @@ export type Database = {
           heartbeat_at?: string | null
           id?: string
           mode?: string
+          rapid_product_seq?: number
           sale_keywords?: string[]
           shop_id?: string
           started_at?: string | null
@@ -479,6 +741,13 @@ export type Database = {
           worker_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "lives_active_product_id_fkey"
+            columns: ["active_product_id"]
+            isOneToOne: false
+            referencedRelation: "live_products"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "lives_shop_id_fkey"
             columns: ["shop_id"]
@@ -1117,6 +1386,47 @@ export type Database = {
         }
         Returns: Json
       }
+      create_and_activate_live_product: {
+        Args: {
+          p_has_color: boolean
+          p_has_size: boolean
+          p_live_id: string
+          p_name: string
+          p_price_cents: number
+          p_shop_id: string
+        }
+        Returns: {
+          created_at: string
+          has_color: boolean
+          has_size: boolean
+          id: string
+          internal_ref: string
+          live_id: string
+          name: string
+          price_cents: number
+          retired_at: string | null
+          shop_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "live_products"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      get_live_buyer_shipping_info: {
+        Args: { p_buyer: string; p_cart_slug: string }
+        Returns: {
+          address: string
+          city: string
+          country: string
+          email: string
+          first_name: string
+          last_name: string
+          phone: string
+          postal_code: string
+        }[]
+      }
       get_live_cart: {
         Args: { p_buyer: string; p_cart_slug: string }
         Returns: {
@@ -1140,6 +1450,21 @@ export type Database = {
       is_pseudo_available: { Args: { check_pseudo: string }; Returns: boolean }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      submit_live_buyer_order: {
+        Args: {
+          p_address: string
+          p_buyer: string
+          p_cart_slug: string
+          p_city: string
+          p_country: string
+          p_email: string
+          p_first_name: string
+          p_last_name: string
+          p_phone: string
+          p_postal_code: string
+        }
+        Returns: undefined
+      }
       upsert_device_push_token: {
         Args: { p_platform: string; p_token: string }
         Returns: undefined
@@ -1148,6 +1473,11 @@ export type Database = {
     Enums: {
       live_order_status: "pending" | "validated" | "paid" | "cancelled"
       live_status: "scheduled" | "live" | "ended"
+      rapid_resolution_state:
+        | "auto"
+        | "ai"
+        | "needs_correction"
+        | "resolved_manual"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1277,6 +1607,12 @@ export const Constants = {
     Enums: {
       live_order_status: ["pending", "validated", "paid", "cancelled"],
       live_status: ["scheduled", "live", "ended"],
+      rapid_resolution_state: [
+        "auto",
+        "ai",
+        "needs_correction",
+        "resolved_manual",
+      ],
     },
   },
 } as const

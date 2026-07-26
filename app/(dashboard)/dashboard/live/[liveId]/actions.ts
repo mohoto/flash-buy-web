@@ -25,13 +25,15 @@ export async function saveConnectionAndStart(liveId: string, formData: FormData)
     ),
   ];
 
-  const mode = formData.get("mode") === "freeform" ? "freeform" : "catalog";
+  const rawMode = formData.get("mode");
+  const mode = rawMode === "freeform" || rawMode === "rapid" ? rawMode : "catalog";
+  const defaultKeywords = mode === "rapid" ? ["jp"] : ["sold", "vendu"];
 
   await supabase
     .from("lives")
     .update({
       tiktok_username: tiktokUsername || null,
-      sale_keywords: keywords.length > 0 ? keywords : ["sold", "vendu"],
+      sale_keywords: keywords.length > 0 ? keywords : defaultKeywords,
       mode,
       status: "live",
       started_at: new Date().toISOString(),
@@ -109,6 +111,72 @@ export async function addManualItem(liveId: string, formData: FormData) {
   });
 
   await recomputeOrderTotal(order.id);
+
+  revalidatePath(`/dashboard/live/${liveId}`);
+}
+
+// Mode freeform : plus aucune écriture automatique côté worker (cf.
+// worker/src/live-session.ts handleComment) — c'est ce clic, sur un
+// commentaire persisté dans live_freeform_comments et choisi par le vendeur,
+// qui crée le panier (si besoin) et l'item, avec un prix saisi à la main
+// puisqu'il n'y a pas de fiche produit à associer. Marque aussi le
+// commentaire comme traité (added_to_cart_at), pour que le bouton reste
+// "Ajouté" après un rechargement de page.
+export async function addFreeformItemToCart(
+  liveId: string,
+  freeformCommentId: string,
+  buyerTiktokUsername: string,
+  sourceComment: string,
+  formData: FormData
+) {
+  const shop = await getOwnShop();
+  const supabase = await createClient();
+
+  const priceCents = Math.round(Number(formData.get("price") ?? 0) * 100);
+  const quantity = Math.max(1, Number(formData.get("quantity") ?? 1));
+  if (!Number.isFinite(priceCents) || priceCents <= 0) return;
+  if (!buyerTiktokUsername) return;
+
+  // Un panier "ouvert" par acheteur et par live (index unique partiel côté DB).
+  let { data: order } = await supabase
+    .from("live_orders")
+    .select("id")
+    .eq("live_id", liveId)
+    .eq("buyer_tiktok_username", buyerTiktokUsername)
+    .in("status", ["pending", "validated"])
+    .maybeSingle();
+
+  if (!order) {
+    const { data: created } = await supabase
+      .from("live_orders")
+      .insert({
+        live_id: liveId,
+        shop_id: shop.id,
+        buyer_tiktok_username: buyerTiktokUsername,
+      })
+      .select("id")
+      .single();
+    order = created;
+  }
+
+  if (!order) return;
+
+  await supabase.from("live_order_items").insert({
+    live_order_id: order.id,
+    product_id: null,
+    quantity,
+    unit_price_cents: priceCents,
+    matched: false,
+    raw_product_text: "Article",
+    source_comment: sourceComment,
+  });
+
+  await recomputeOrderTotal(order.id);
+
+  await supabase
+    .from("live_freeform_comments")
+    .update({ added_to_cart_at: new Date().toISOString() })
+    .eq("id", freeformCommentId);
 
   revalidatePath(`/dashboard/live/${liveId}`);
 }

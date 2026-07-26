@@ -2,6 +2,13 @@ import { supabase } from "./supabase.js";
 import { getCatalog } from "./catalog.js";
 import { parseSaleComment } from "./parsing.js";
 import { connectToLive, type EulerConnection, type LiveComment } from "./euler.js";
+import { parseRapidComment, type ActiveRapidProduct } from "./rapid-parsing.js";
+import {
+  getActiveProduct,
+  bufferOrphanComment,
+  onOrphanResolved,
+  type OrphanRapidComment,
+} from "./rapid-active-product.js";
 
 export type LiveSession = {
   liveId: string;
@@ -159,10 +166,37 @@ async function handleComment(
   broadcastComment(liveId, comment);
   await trackActiveCommenter(liveId, comment);
 
-  // Mode "freeform" : pas de matching produit, le vendeur associe le
-  // commentaire à un produit après coup (comme le flux "non reconnu"
-  // existant en mode catalog) — catalogue vide, jamais getCatalog(shopId).
-  const catalog = mode === "catalog" ? getCatalog(shopId) : [];
+  if (mode === "rapid") {
+    await handleRapidComment(liveId, comment, saleKeywords);
+    return;
+  }
+
+  // Mode "freeform" : jamais d'écriture automatique en live_order_items (pour
+  // éviter les faux positifs comme "1× les deux" ajoutés au panier sans
+  // intention). Seuls les commentaires contenant le mot-clé sont persistés
+  // dans live_freeform_comments, en attente d'un ajout manuel au panier par
+  // le vendeur (bouton "Ajouter au panier" dans "Commentaires reconnus").
+  if (mode !== "catalog") {
+    const parsed = parseSaleComment(comment.text, [], saleKeywords);
+    if (!parsed.isSale) return;
+
+    const { error } = await supabase.from("live_freeform_comments").insert({
+      live_id: liveId,
+      buyer_tiktok_username: comment.username,
+      nickname: comment.nickname,
+      profile_picture_url: comment.profilePictureUrl,
+      text: comment.text,
+      tiktok_comment_id: comment.commentId,
+    });
+
+    if (error && error.code !== "23505") {
+      // 23505 = doublon idempotent (redelivery WebSocket), attendu.
+      console.error(JSON.stringify({ level: "error", liveId, error: error.message }));
+    }
+    return;
+  }
+
+  const catalog = getCatalog(shopId);
   const parsed = parseSaleComment(comment.text, catalog, saleKeywords);
   console.log(JSON.stringify({
     level: "info",
@@ -238,4 +272,190 @@ async function recomputeOrderTotal(orderId: string) {
   );
 
   await supabase.from("live_orders").update({ total_cents: total }).eq("id", orderId);
+}
+
+// Mode "rapid" : un "jp" est attribué au produit "à l'antenne" du live
+// (lives.active_product_id), jamais recherché par nom dans un catalogue (cf.
+// worker/src/rapid-parsing.ts). Si le produit actif n'est pas encore connu
+// de ce worker (course avec la création côté dashboard), le commentaire est
+// mis en tampon plutôt que perdu (cf. worker/src/rapid-active-product.ts).
+export async function handleRapidComment(liveId: string, comment: LiveComment, saleKeywords?: string[]) {
+  const jpKeywords = saleKeywords && saleKeywords.length > 0 ? saleKeywords : ["jp"];
+
+  const activeProduct = getActiveProduct(liveId);
+
+  // parseRapidComment renvoie null uniquement si le mot-clé "jp" est absent
+  // du commentaire (indépendamment du produit actif) — appelé avec
+  // activeProduct=null ici s'il n'est pas encore connu, ce qui produit un
+  // résultat "needs_correction/no_active_product" que l'on ignore : seul le
+  // signal "est-ce bien un jp ?" nous intéresse à ce stade, pour décider de
+  // bufferiser ou non.
+  const probe = parseRapidComment(comment.text, activeProduct, jpKeywords);
+  if (probe === null) return;
+
+  if (!activeProduct) {
+    bufferOrphanComment({ liveId, shopId: "", comment, receivedAt: Date.now() });
+    return;
+  }
+
+  await resolveAndPersistRapidComment(liveId, comment, activeProduct, jpKeywords, Date.now());
+}
+
+async function resolveAndPersistRapidComment(
+  liveId: string,
+  comment: LiveComment,
+  activeProduct: ActiveRapidProduct,
+  jpKeywords: string[],
+  receivedAtMs: number
+) {
+  const parsed = parseRapidComment(comment.text, activeProduct, jpKeywords);
+  if (!parsed) return;
+
+  const { data: shopRow } = await supabase
+    .from("live_products")
+    .select("shop_id")
+    .eq("id", activeProduct.id)
+    .single();
+  const shopId = shopRow?.shop_id;
+  if (!shopId) return;
+
+  const resolutionState = parsed.state === "auto" ? "auto" : "needs_correction";
+
+  const { data: rapidItem, error } = await supabase
+    .from("live_rapid_items")
+    .insert({
+      live_id: liveId,
+      shop_id: shopId,
+      live_product_id: parsed.state === "auto" ? activeProduct.id : null,
+      buyer_tiktok_username: comment.username,
+      nickname: comment.nickname,
+      profile_picture_url: comment.profilePictureUrl,
+      source_comment: comment.text,
+      tiktok_comment_id: comment.commentId,
+      quantity: parsed.quantity,
+      raw_color_text: parsed.colorToken,
+      raw_size_text: parsed.sizeToken,
+      resolution_state: resolutionState,
+      resolution_reason: parsed.reason ?? null,
+      received_at: new Date(receivedAtMs).toISOString(),
+      resolved_at: parsed.state === "auto" ? new Date().toISOString() : null,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    if (error.code !== "23505") {
+      // 23505 = doublon idempotent (redelivery WebSocket), attendu.
+      console.error(JSON.stringify({ level: "error", liveId, error: error.message }));
+    }
+    return;
+  }
+
+  if (parsed.state !== "auto" || !rapidItem) return;
+
+  await attachRapidItemToCart(liveId, shopId, comment, activeProduct, parsed.quantity, rapidItem.id);
+}
+
+// Attache un "jp" résolu (auto ou corrigé manuellement) au panier acheteur,
+// via le même schéma live_orders/live_order_items que les deux autres modes
+// (le flux acheteur /live/[cartSlug] et le checkout Phase 2 n'ont donc rien
+// à connaître du mode rapid).
+async function attachRapidItemToCart(
+  liveId: string,
+  shopId: string,
+  comment: LiveComment,
+  activeProduct: ActiveRapidProduct,
+  quantity: number,
+  rapidItemId: string
+) {
+  const buyerTiktokUsername = comment.username;
+
+  let { data: order } = await supabase
+    .from("live_orders")
+    .select("id")
+    .eq("live_id", liveId)
+    .eq("buyer_tiktok_username", buyerTiktokUsername)
+    .in("status", ["pending", "validated"])
+    .maybeSingle();
+
+  if (!order) {
+    const { data: created } = await supabase
+      .from("live_orders")
+      .insert({ live_id: liveId, shop_id: shopId, buyer_tiktok_username: buyerTiktokUsername })
+      .select("id")
+      .single();
+    order = created;
+  }
+  if (!order) return;
+
+  const { data: orderItem, error } = await supabase
+    .from("live_order_items")
+    .insert({
+      live_order_id: order.id,
+      product_id: null,
+      quantity,
+      unit_price_cents: activeProduct.priceCents,
+      matched: true,
+      raw_product_text: `${activeProduct.name} (${activeProduct.internalRef})`,
+      source_comment: comment.text,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error(JSON.stringify({ level: "error", liveId, error: error.message }));
+    return;
+  }
+
+  await supabase
+    .from("live_rapid_items")
+    .update({ live_order_id: order.id, live_order_item_id: orderItem?.id ?? null })
+    .eq("id", rapidItemId);
+
+  await recomputeOrderTotal(order.id);
+}
+
+// Rejoué quand un orphelin du tampon anti-race-condition se rattache à un
+// produit désormais connu (cf. worker/src/rapid-active-product.ts) : on
+// reprend le parsing complet maintenant que les dimensions du produit sont
+// disponibles, avec l'horodatage ORIGINAL du commentaire (pas celui du flush).
+onOrphanResolved(async (orphan, product) => {
+  await resolveAndPersistRapidComment(
+    orphan.liveId,
+    orphan.comment,
+    product,
+    ["jp"],
+    orphan.receivedAt
+  );
+});
+
+// Orphelins expirés (produit jamais trouvé dans le délai imparti) : insérés
+// directement en "à corriger", horodatage d'origine conservé pour l'affichage
+// "produit non trouvé, reçu à HH:MM:SS" côté vendeur. Aucun "jp" n'est perdu.
+export async function persistExpiredRapidOrphan(orphan: OrphanRapidComment) {
+  const { data: live } = await supabase
+    .from("lives")
+    .select("shop_id")
+    .eq("id", orphan.liveId)
+    .single();
+  if (!live) return;
+
+  const { error } = await supabase.from("live_rapid_items").insert({
+    live_id: orphan.liveId,
+    shop_id: live.shop_id,
+    live_product_id: null,
+    buyer_tiktok_username: orphan.comment.username,
+    nickname: orphan.comment.nickname,
+    profile_picture_url: orphan.comment.profilePictureUrl,
+    source_comment: orphan.comment.text,
+    tiktok_comment_id: orphan.comment.commentId,
+    quantity: 1,
+    resolution_state: "needs_correction",
+    resolution_reason: "produit_non_trouve",
+    received_at: new Date(orphan.receivedAt).toISOString(),
+  });
+
+  if (error && error.code !== "23505") {
+    console.error(JSON.stringify({ level: "error", liveId: orphan.liveId, error: error.message }));
+  }
 }

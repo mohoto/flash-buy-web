@@ -119,11 +119,11 @@ export function LiveConnectionForm({
           id="sale_keywords"
           name="sale_keywords"
           defaultValue={saleKeywords.join(", ")}
-          placeholder="sold, vendu"
+          placeholder="sold, vendu (ou jp en mode Création live)"
         />
         <FieldDescription>
           Séparés par des virgules. Un commentaire doit contenir l&apos;un de ces mots pour être
-          reconnu comme une vente.
+          reconnu comme une vente (ou une intention d&apos;achat en mode Création live).
         </FieldDescription>
       </Field>
 
@@ -146,6 +146,16 @@ export function LiveConnectionForm({
               <span className="block text-xs text-muted-foreground">
                 Aucun produit associé automatiquement : les commentaires reconnus
                 s&apos;affichent bruts, à toi de créer le produit et de l&apos;associer ensuite.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 text-sm text-foreground">
+            <Radio value="rapid" className="mt-0.5" />
+            <span>
+              <span className="block font-medium">Création live</span>
+              <span className="block text-xs text-muted-foreground">
+                Tu crées un article à l&apos;antenne pendant le live (prix, un clic) ; les
+                acheteurs tapent juste &quot;jp&quot; pour dire qu&apos;ils le prennent.
               </span>
             </span>
           </label>

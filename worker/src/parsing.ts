@@ -1,4 +1,5 @@
 import Fuse from "fuse.js";
+import { norm, isInt } from "./text-normalize.js";
 
 export type CatalogProduct = {
   id: string;
@@ -12,16 +13,6 @@ const SIZE_VOCAB = new Set([
   "xs", "s", "m", "l", "xl", "xxl", "xxxl", "unique", "u",
 ]);
 
-const norm = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-const isInt = (t: string) => /^\d+$/.test(t);
 const looksLikeSize = (t: string) =>
   SIZE_VOCAB.has(t) || (isInt(t) && +t >= 30 && +t <= 50);
 

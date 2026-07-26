@@ -10,7 +10,13 @@ import {
   resetEventLoopStats,
 } from "./sharding.js";
 import { trackShop, untrackShop, startPeriodicCatalogRefresh, stopRealtimeSubscription } from "./catalog.js";
-import { startLiveSession, type LiveSession } from "./live-session.js";
+import {
+  trackRapidLive,
+  untrackRapidLive,
+  startRapidOrphanSweep,
+  stopRapidRealtimeSubscription,
+} from "./rapid-active-product.js";
+import { startLiveSession, type LiveSession, persistExpiredRapidOrphan } from "./live-session.js";
 import { startHealthServer } from "./health-server.js";
 import { startSimulationServer } from "./simulation-server.js";
 
@@ -33,6 +39,7 @@ async function onLiveEnded(liveId: string) {
   if (!session) return;
   activeSessions.delete(liveId);
   if (sessionModes.get(liveId) === "catalog") untrackShop(session.shopId);
+  if (sessionModes.get(liveId) === "rapid") untrackRapidLive(liveId);
   sessionModes.delete(liveId);
   await releaseLive(liveId);
   log("info", "live session ended", { liveId });
@@ -59,8 +66,12 @@ async function claimLoop() {
       try {
         // Mode "freeform" : le worker ne charge jamais le catalogue de ce
         // vendeur en mémoire pour ce live (cf. handleComment côté
-        // live-session.ts, qui ignore getCatalog dans ce mode).
+        // live-session.ts, qui ignore getCatalog dans ce mode). Mode "rapid" :
+        // pas de catalogue non plus (produits créés à la volée), mais le
+        // worker suit le produit "à l'antenne" du live (cf.
+        // rapid-active-product.ts).
         if (claimed.mode === "catalog") await trackShop(claimed.shop_id);
+        if (claimed.mode === "rapid") await trackRapidLive(claimed.id, claimed.shop_id);
         const session = await startLiveSession(
           claimed.id,
           claimed.shop_id,
@@ -76,6 +87,7 @@ async function claimLoop() {
           error: (err as Error).message,
         });
         if (claimed.mode === "catalog") untrackShop(claimed.shop_id);
+        if (claimed.mode === "rapid") untrackRapidLive(claimed.id);
         sessionModes.delete(claimed.id);
         await releaseLive(claimed.id);
       }
@@ -119,6 +131,7 @@ async function shutdown(signal: string) {
     session.connection.disconnect();
   }
   stopRealtimeSubscription();
+  stopRapidRealtimeSubscription();
   await releaseAllOwnLives();
 
   log("info", "shutdown complete");
@@ -134,6 +147,7 @@ startHeartbeatLoop();
 startReapLoop();
 startHealthReportLoop();
 startPeriodicCatalogRefresh();
+startRapidOrphanSweep(persistExpiredRapidOrphan);
 claimLoop();
 
 log("info", "worker started", {

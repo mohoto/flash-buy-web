@@ -26,6 +26,12 @@ export const config = {
   // même si un événement Realtime a été manqué.
   catalogRefreshIntervalMs: int("CATALOG_REFRESH_INTERVAL_MS", 5 * 60_000),
 
+  // Mode rapid : tampon anti-race-condition pour les "jp" reçus avant qu'un
+  // produit créé en live soit connu de ce worker. Filet plus serré que le
+  // catalogue (secondes, pas minutes) car un acheteur n'attend pas.
+  rapidOrphanRetryMs: int("RAPID_ORPHAN_RETRY_MS", 1_000),
+  rapidOrphanMaxAgeMs: int("RAPID_ORPHAN_MAX_AGE_MS", 8_000),
+
   workerId: process.env.WORKER_ID ?? `worker-${process.pid}-${Date.now()}`,
 };
 
