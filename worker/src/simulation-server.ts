@@ -3,14 +3,11 @@ import { randomUUID } from "node:crypto";
 import { supabase } from "./supabase.js";
 import { loadCatalog } from "./catalog.js";
 import { parseSaleComment } from "./parsing.js";
-import { handleRapidComment } from "./live-session.js";
-import { trackRapidLive } from "./rapid-active-product.js";
+import { trackRapidLive, enqueueRapidComment } from "./rapid-batch-queue.js";
 
 // Lives déjà suivis par ce serveur de simulation, pour ne pas rappeler
-// trackRapidLive (et donc recharger le produit actif) à chaque requête —
-// même souci qu'un vrai worker : le cache en mémoire ne doit être initialisé
-// qu'une fois par live, sinon on ne peut jamais observer un état "pas encore
-// connu" pour tester le tampon anti-race-condition.
+// trackRapidLive à chaque requête — même souci qu'un vrai worker : la file
+// en mémoire ne doit être enregistrée qu'une fois par live.
 const simulatedRapidLives = new Set<string>();
 
 // Injecteur de commentaires factices : permet de tester tout le pipeline
@@ -56,27 +53,19 @@ export function startSimulationServer(port: number) {
     }
 
     if (live.mode === "rapid") {
-      // Ne (re)charge le produit actif qu'à la première requête simulée pour
-      // ce live — comme un vrai worker, ensuite seul Realtime/le filet
-      // périodique le met à jour. C'est ce qui permet de reproduire la
-      // course : poster un "jp" juste après avoir activé un produit, avant
-      // que le cache de CE process n'ait eu le temps de se mettre à jour.
       if (!simulatedRapidLives.has(liveId)) {
         simulatedRapidLives.add(liveId);
-        await trackRapidLive(liveId, live.shop_id);
+        trackRapidLive(liveId, live.shop_id);
       }
 
-      await handleRapidComment(
-        liveId,
-        {
-          commentId: `sim-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          userId: randomUUID(),
-          username,
-          nickname: username,
-          profilePictureUrl: null,
-          text,
-        }
-      );
+      enqueueRapidComment(liveId, live.shop_id, {
+        commentId: `sim-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        userId: randomUUID(),
+        username,
+        nickname: username,
+        profilePictureUrl: null,
+        text,
+      });
 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ mode: "rapid", accepted: true }));

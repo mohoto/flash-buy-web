@@ -3,27 +3,21 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AnimatePresence, motion } from "motion/react";
+import { Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
 import { LiveCommentsFeed } from "./live-comments-feed";
 import {
   createAndActivateRapidProduct,
   reactivateRapidProduct,
-  correctRapidItem,
+  assignRapidItemToProduct,
   deleteRapidItem,
 } from "./rapid-actions";
 
@@ -32,8 +26,6 @@ type LiveProduct = {
   name: string;
   price_cents: number;
   internal_ref: string;
-  has_color: boolean;
-  has_size: boolean;
   retired_at: string | null;
 };
 
@@ -45,10 +37,6 @@ type RapidItem = {
   profile_picture_url: string | null;
   source_comment: string;
   quantity: number;
-  raw_color_text: string | null;
-  raw_size_text: string | null;
-  resolution_state: "auto" | "ai" | "needs_correction" | "resolved_manual";
-  resolution_reason: string | null;
   received_at: string;
   created_at: string;
 };
@@ -58,16 +46,6 @@ const listItemMotion = {
   animate: { scale: 1, opacity: 1 },
   exit: { scale: 0.96, opacity: 0 },
   transition: { type: "spring" as const, stiffness: 350, damping: 40 },
-};
-
-const REASON_LABELS: Record<string, string> = {
-  missing_color: "couleur manquante",
-  missing_size: "taille manquante",
-  unrecognized_token: "mot non reconnu",
-  color_not_expected: "couleur inattendue pour ce produit",
-  ambiguous_numeric_size: "taille chiffrée ambiguë avec la quantité",
-  no_active_product: "aucun produit à l'antenne au moment du commentaire",
-  produit_non_trouve: "produit non trouvé",
 };
 
 export function RapidConsoleClient({
@@ -90,13 +68,13 @@ export function RapidConsoleClient({
       const [{ data: liveProducts }, { data: rapidItems }] = await Promise.all([
         supabase
           .from("live_products")
-          .select("id, name, price_cents, internal_ref, has_color, has_size, retired_at")
+          .select("id, name, price_cents, internal_ref, retired_at")
           .eq("live_id", liveId)
           .order("created_at", { ascending: true }),
         supabase
           .from("live_rapid_items")
           .select(
-            "id, live_product_id, buyer_tiktok_username, nickname, profile_picture_url, source_comment, quantity, raw_color_text, raw_size_text, resolution_state, resolution_reason, received_at, created_at"
+            "id, live_product_id, buyer_tiktok_username, nickname, profile_picture_url, source_comment, quantity, received_at, created_at"
           )
           .eq("live_id", liveId)
           .order("created_at", { ascending: false }),
@@ -136,10 +114,9 @@ export function RapidConsoleClient({
 
   return (
     <div className="flex flex-col gap-4">
-      <RapidCreationBar liveId={liveId} nextSeqHint={products.length + 1} />
-
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <section className="flex min-w-0 flex-col gap-3">
+          <RapidCreationBar liveId={liveId} nextSeqHint={products.length + 1} />
           <ActiveAndPreviousProducts
             liveId={liveId}
             activeProduct={activeProduct}
@@ -179,13 +156,8 @@ export function RapidConsoleClient({
 // Barre de création express : toujours visible, un seul geste ("un article =
 // un geste en moins d'une seconde"). Le prix est le seul champ obligatoire et
 // reste focus par défaut ; Entrée valide (crée + active) puis refocus le prix
-// pour l'article suivant, sans jamais ouvrir de modale. Les cases
-// couleur/taille sont mémorisées d'un produit à l'autre dans la même session
-// (état local, pas persisté) pour ne pas ralentir une série d'articles
-// similaires.
+// pour l'article suivant, sans jamais ouvrir de modale.
 function RapidCreationBar({ liveId, nextSeqHint }: { liveId: string; nextSeqHint: number }) {
-  const [hasColor, setHasColor] = useState(false);
-  const [hasSize, setHasSize] = useState(false);
   const [isPending, startTransition] = useTransition();
   const priceRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -200,8 +172,6 @@ function RapidCreationBar({ liveId, nextSeqHint }: { liveId: string; nextSeqHint
     const formData = new FormData();
     formData.set("price", price);
     formData.set("name", nameRef.current?.value ?? "");
-    if (hasColor) formData.set("has_color", "on");
-    if (hasSize) formData.set("has_size", "on");
 
     startTransition(async () => {
       await createAndActivateRapidProduct(liveId, formData);
@@ -214,56 +184,50 @@ function RapidCreationBar({ liveId, nextSeqHint }: { liveId: string; nextSeqHint
 
   return (
     <Card>
-      <CardContent className="flex flex-wrap items-end gap-3 py-4">
-        <Field className="min-w-32 gap-1.5">
-          <FieldLabel htmlFor="rapid-price" className="text-xs">
-            Prix
-          </FieldLabel>
-          <Input
-            id="rapid-price"
-            ref={priceRef}
-            type="number"
-            min={0}
-            step="0.01"
-            autoFocus
-            placeholder="0 €"
-            className="text-lg font-semibold tabular-nums"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-        </Field>
+      <CardContent className="flex flex-col gap-3 py-4">
+        <div className="flex items-end gap-3">
+          <Field className="w-24 gap-1.5">
+            <FieldLabel htmlFor="rapid-price" className="text-xs">
+              Prix
+            </FieldLabel>
+            <Input
+              id="rapid-price"
+              ref={priceRef}
+              type="number"
+              min={0}
+              step="0.01"
+              autoFocus
+              placeholder="0 €"
+              className="text-lg font-semibold tabular-nums"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+          </Field>
 
-        <Field className="min-w-48 flex-1 gap-1.5">
-          <FieldLabel htmlFor="rapid-name" className="text-xs">
-            Nom
-          </FieldLabel>
-          <Input
-            id="rapid-name"
-            ref={nameRef}
-            placeholder={`Nom (auto : Article A${nextSeqHint})`}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-        </Field>
+          <Field className="min-w-0 flex-1 gap-1.5">
+            <FieldLabel htmlFor="rapid-name" className="text-xs">
+              Nom
+            </FieldLabel>
+            <Input
+              id="rapid-name"
+              ref={nameRef}
+              placeholder={`Auto : Article A${nextSeqHint}`}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+          </Field>
+        </div>
 
-        <label className="flex items-center gap-1.5 pb-2 text-sm text-foreground">
-          <Checkbox checked={hasColor} onCheckedChange={(v) => setHasColor(!!v)} />
-          Couleur
-        </label>
-        <label className="flex items-center gap-1.5 pb-2 text-sm text-foreground">
-          <Checkbox checked={hasSize} onCheckedChange={(v) => setHasSize(!!v)} />
-          Taille
-        </label>
-
-        <Button onClick={submit} disabled={isPending} className="shrink-0">
+        <Button onClick={submit} disabled={isPending} className="w-full">
+          <Radio />
           À l&apos;antenne
         </Button>
       </CardContent>
@@ -271,6 +235,8 @@ function RapidCreationBar({ liveId, nextSeqHint }: { liveId: string; nextSeqHint
   );
 }
 
+// Cartes produit = sources de glisser-déposer (draggable). Transporte
+// uniquement l'id du produit via dataTransfer, lu par RapidIntentCard au dépôt.
 function ActiveAndPreviousProducts({
   liveId,
   activeProduct,
@@ -289,7 +255,14 @@ function ActiveAndPreviousProducts({
   return (
     <>
       {activeProduct ? (
-        <Card className="border-primary/50">
+        <Card
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData("text/plain", activeProduct.id);
+            e.dataTransfer.effectAllowed = "copy";
+          }}
+          className="cursor-grab border-primary/50 active:cursor-grabbing"
+        >
           <CardContent className="py-4">
             <Badge className="mb-2">À l&apos;antenne</Badge>
             <h3 className="font-heading text-xl font-semibold text-foreground">
@@ -324,7 +297,14 @@ function ActiveAndPreviousProducts({
             <ul className="flex flex-col gap-2 pr-1">
               {previousProducts.map((product) => (
                 <li key={product.id} className="list-none">
-                  <Card>
+                  <Card
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData("text/plain", product.id);
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                    className="cursor-grab active:cursor-grabbing"
+                  >
                     <CardContent className="flex items-center justify-between p-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-foreground">
@@ -361,19 +341,6 @@ function ActiveAndPreviousProducts({
   );
 }
 
-function stateBadge(item: RapidItem) {
-  switch (item.resolution_state) {
-    case "auto":
-      return <Badge variant="success">Auto</Badge>;
-    case "ai":
-      return <Badge variant="ai">IA</Badge>;
-    case "resolved_manual":
-      return <Badge variant="secondary">Corrigé</Badge>;
-    default:
-      return <Badge variant="warning">À corriger</Badge>;
-  }
-}
-
 function RapidIntentFeed({
   liveId,
   items,
@@ -391,7 +358,7 @@ function RapidIntentFeed({
     return (
       <Empty className="rounded-xl border py-10">
         <EmptyHeader>
-          <EmptyTitle>Aucun &quot;jp&quot; pour l&apos;instant</EmptyTitle>
+          <EmptyTitle>Aucune intention d&apos;achat pour l&apos;instant</EmptyTitle>
           <EmptyDescription>
             Les intentions d&apos;achat des acheteurs apparaîtront ici en temps réel.
           </EmptyDescription>
@@ -406,60 +373,13 @@ function RapidIntentFeed({
         <AnimatePresence initial={false}>
           {items.map((item) => (
             <motion.div key={item.id} layout {...listItemMotion}>
-              <Card>
-                <CardContent className="flex items-center gap-3 p-3">
-                  <Avatar className="size-8 shrink-0">
-                    <AvatarImage src={item.profile_picture_url ?? undefined} alt={item.buyer_tiktok_username} />
-                    <AvatarFallback className="text-xs">
-                      {item.buyer_tiktok_username.slice(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">
-                      @{item.buyer_tiktok_username}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      &quot;{item.source_comment}&quot;
-                    </p>
-                    {item.resolution_state === "needs_correction" && item.resolution_reason && (
-                      <p className="mt-1 text-xs text-warning-foreground">
-                        {REASON_LABELS[item.resolution_reason] ?? item.resolution_reason}
-                        {item.resolution_reason === "produit_non_trouve" && (
-                          <>
-                            {" "}— reçu à{" "}
-                            {new Date(item.received_at).toLocaleTimeString("fr-FR", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              second: "2-digit",
-                            })}
-                          </>
-                        )}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-2">
-                    {stateBadge(item)}
-                    {item.resolution_state === "needs_correction" && (
-                      <CorrectRapidItemForm
-                        liveId={liveId}
-                        itemId={item.id}
-                        products={products}
-                        quantity={item.quantity}
-                      />
-                    )}
-                    <button
-                      onClick={() => startTransition(() => deleteRapidItem(liveId, item.id))}
-                      disabled={isPending}
-                      className="text-muted-foreground hover:text-destructive"
-                      aria-label="Supprimer"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </CardContent>
-              </Card>
+              <RapidIntentCard
+                liveId={liveId}
+                item={item}
+                products={products}
+                isPending={isPending}
+                startTransition={startTransition}
+              />
             </motion.div>
           ))}
         </AnimatePresence>
@@ -468,35 +388,79 @@ function RapidIntentFeed({
   );
 }
 
-function CorrectRapidItemForm({
+// Carte d'intention = cible de dépôt (assignée ou non, pour permettre la
+// ré-assignation). onDragOver DOIT appeler preventDefault() sinon onDrop ne
+// se déclenche jamais (comportement par défaut du navigateur : refuse le
+// dépôt) — piège classique du DnD HTML5 natif.
+function RapidIntentCard({
   liveId,
-  itemId,
+  item,
   products,
-  quantity,
+  isPending,
+  startTransition,
 }: {
   liveId: string;
-  itemId: string;
+  item: RapidItem;
   products: LiveProduct[];
-  quantity: number;
+  isPending: boolean;
+  startTransition: (callback: () => void) => void;
 }) {
+  const [isDragOver, setIsDragOver] = useState(false);
+  const assignedProduct = products.find((p) => p.id === item.live_product_id);
+
   return (
-    <form action={correctRapidItem.bind(null, liveId, itemId)} className="flex items-center gap-1">
-      <input type="hidden" name="quantity" value={quantity} />
-      <Select name="live_product_id" required>
-        <SelectTrigger size="sm" className="min-w-32">
-          <SelectValue placeholder="Choisir…" />
-        </SelectTrigger>
-        <SelectContent>
-          {products.map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              {p.name} ({p.internal_ref})
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Button type="submit" size="sm" variant="secondary">
-        Corriger
-      </Button>
-    </form>
+    <Card
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }}
+      onDragEnter={() => setIsDragOver(true)}
+      onDragLeave={() => setIsDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        const productId = e.dataTransfer.getData("text/plain");
+        if (!productId) return;
+        startTransition(() => assignRapidItemToProduct(liveId, item.id, productId));
+      }}
+      className={cn(isDragOver && "ring-2 ring-primary bg-primary/5")}
+    >
+      <CardContent className="flex flex-col gap-2 p-3">
+        <div className="flex items-center gap-2">
+          <Avatar className="size-7 shrink-0">
+            <AvatarImage src={item.profile_picture_url ?? undefined} alt={item.buyer_tiktok_username} />
+            <AvatarFallback className="text-xs">
+              {item.buyer_tiktok_username.slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            @{item.buyer_tiktok_username}
+          </p>
+          <Badge variant="success">Détecté</Badge>
+          <button
+            onClick={() => startTransition(() => deleteRapidItem(liveId, item.id))}
+            disabled={isPending}
+            className="shrink-0 text-muted-foreground hover:text-destructive"
+            aria-label="Supprimer"
+          >
+            ×
+          </button>
+        </div>
+
+        <p className="truncate text-xs text-muted-foreground">
+          &quot;{item.source_comment}&quot;
+        </p>
+
+        {assignedProduct ? (
+          <p className="text-sm text-foreground">
+            {item.quantity}× {assignedProduct.name} ({assignedProduct.internal_ref})
+          </p>
+        ) : (
+          <p className="rounded border border-dashed p-2 text-center text-xs text-muted-foreground">
+            Glisser un produit ici
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

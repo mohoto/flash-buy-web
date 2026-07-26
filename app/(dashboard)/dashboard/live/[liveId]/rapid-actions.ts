@@ -15,8 +15,6 @@ export async function createAndActivateRapidProduct(liveId: string, formData: Fo
 
   const rawName = String(formData.get("name") ?? "").trim();
   const priceEuros = Number(formData.get("price") ?? 0);
-  const hasColor = formData.get("has_color") === "on";
-  const hasSize = formData.get("has_size") === "on";
 
   if (!Number.isFinite(priceEuros) || priceEuros <= 0) return;
 
@@ -40,8 +38,6 @@ export async function createAndActivateRapidProduct(liveId: string, formData: Fo
     p_shop_id: shop.id,
     p_name: name,
     p_price_cents: Math.round(priceEuros * 100),
-    p_has_color: hasColor,
-    p_has_size: hasSize,
   });
 
   revalidatePath(`/dashboard/live/${liveId}`);
@@ -114,18 +110,14 @@ export async function reactivateRapidProduct(liveId: string, productId: string) 
   revalidatePath(`/dashboard/live/${liveId}`);
 }
 
-// Réassignation manuelle d'un item "à corriger" : choisit le produit (actif
-// ou précédent) auquel l'intention d'achat doit être rattachée, avec
-// éventuellement une quantité corrigée. Suit le même schéma que correctItem
-// (mode catalog) mais écrit dans live_rapid_items + le miroir
-// live_orders/live_order_items partagé avec les deux autres modes.
-export async function correctRapidItem(liveId: string, itemId: string, formData: FormData) {
+// Assignation par glisser-déposer : rattache une intention d'achat détectée
+// par l'IA (jusque-là non assignée, ou déjà assignée à un autre produit) au
+// produit déposé dessus. Supporte la ré-assignation : si l'item avait déjà
+// un live_order_item_id, cette ligne est supprimée avant d'en recréer une
+// nouvelle, pour ne jamais compter deux fois le même item dans le total.
+export async function assignRapidItemToProduct(liveId: string, itemId: string, productId: string) {
   const shop = await getOwnShop();
   const supabase = await createClient();
-
-  const productId = String(formData.get("live_product_id") ?? "");
-  const quantity = Math.max(1, Number(formData.get("quantity") ?? 1));
-  if (!productId) return;
 
   const { data: product } = await supabase
     .from("live_products")
@@ -137,11 +129,15 @@ export async function correctRapidItem(liveId: string, itemId: string, formData:
 
   const { data: rapidItem } = await supabase
     .from("live_rapid_items")
-    .select("id, buyer_tiktok_username, source_comment")
+    .select("id, buyer_tiktok_username, source_comment, live_order_item_id")
     .eq("id", itemId)
     .eq("shop_id", shop.id)
     .single();
   if (!rapidItem) return;
+
+  if (rapidItem.live_order_item_id) {
+    await supabase.from("live_order_items").delete().eq("id", rapidItem.live_order_item_id);
+  }
 
   let { data: order } = await supabase
     .from("live_orders")
@@ -170,7 +166,7 @@ export async function correctRapidItem(liveId: string, itemId: string, formData:
     .insert({
       live_order_id: order.id,
       product_id: null,
-      quantity,
+      quantity: 1,
       unit_price_cents: product.price_cents,
       matched: true,
       raw_product_text: `${product.name} (${product.internal_ref})`,
@@ -183,10 +179,6 @@ export async function correctRapidItem(liveId: string, itemId: string, formData:
     .from("live_rapid_items")
     .update({
       live_product_id: product.id,
-      quantity,
-      resolution_state: "resolved_manual",
-      resolution_reason: null,
-      resolved_at: new Date().toISOString(),
       live_order_id: order.id,
       live_order_item_id: orderItem?.id ?? null,
     })

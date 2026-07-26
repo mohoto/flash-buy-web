@@ -491,8 +491,6 @@ export type Database = {
       live_products: {
         Row: {
           created_at: string
-          has_color: boolean
-          has_size: boolean
           id: string
           internal_ref: string
           live_id: string
@@ -503,8 +501,6 @@ export type Database = {
         }
         Insert: {
           created_at?: string
-          has_color?: boolean
-          has_size?: boolean
           id?: string
           internal_ref: string
           live_id: string
@@ -515,8 +511,6 @@ export type Database = {
         }
         Update: {
           created_at?: string
-          has_color?: boolean
-          has_size?: boolean
           id?: string
           internal_ref?: string
           live_id?: string
@@ -554,12 +548,7 @@ export type Database = {
           nickname: string | null
           profile_picture_url: string | null
           quantity: number
-          raw_color_text: string | null
-          raw_size_text: string | null
           received_at: string
-          resolution_reason: string | null
-          resolution_state: Database["public"]["Enums"]["rapid_resolution_state"]
-          resolved_at: string | null
           shop_id: string
           source_comment: string
           tiktok_comment_id: string | null
@@ -575,12 +564,7 @@ export type Database = {
           nickname?: string | null
           profile_picture_url?: string | null
           quantity?: number
-          raw_color_text?: string | null
-          raw_size_text?: string | null
           received_at?: string
-          resolution_reason?: string | null
-          resolution_state?: Database["public"]["Enums"]["rapid_resolution_state"]
-          resolved_at?: string | null
           shop_id: string
           source_comment: string
           tiktok_comment_id?: string | null
@@ -596,12 +580,7 @@ export type Database = {
           nickname?: string | null
           profile_picture_url?: string | null
           quantity?: number
-          raw_color_text?: string | null
-          raw_size_text?: string | null
           received_at?: string
-          resolution_reason?: string | null
-          resolution_state?: Database["public"]["Enums"]["rapid_resolution_state"]
-          resolved_at?: string | null
           shop_id?: string
           source_comment?: string
           tiktok_comment_id?: string | null
@@ -1388,8 +1367,6 @@ export type Database = {
       }
       create_and_activate_live_product: {
         Args: {
-          p_has_color: boolean
-          p_has_size: boolean
           p_live_id: string
           p_name: string
           p_price_cents: number
@@ -1397,8 +1374,6 @@ export type Database = {
         }
         Returns: {
           created_at: string
-          has_color: boolean
-          has_size: boolean
           id: string
           internal_ref: string
           live_id: string
@@ -1473,11 +1448,6 @@ export type Database = {
     Enums: {
       live_order_status: "pending" | "validated" | "paid" | "cancelled"
       live_status: "scheduled" | "live" | "ended"
-      rapid_resolution_state:
-        | "auto"
-        | "ai"
-        | "needs_correction"
-        | "resolved_manual"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1607,12 +1577,6 @@ export const Constants = {
     Enums: {
       live_order_status: ["pending", "validated", "paid", "cancelled"],
       live_status: ["scheduled", "live", "ended"],
-      rapid_resolution_state: [
-        "auto",
-        "ai",
-        "needs_correction",
-        "resolved_manual",
-      ],
     },
   },
 } as const

@@ -26,11 +26,16 @@ export const config = {
   // même si un événement Realtime a été manqué.
   catalogRefreshIntervalMs: int("CATALOG_REFRESH_INTERVAL_MS", 5 * 60_000),
 
-  // Mode rapid : tampon anti-race-condition pour les "jp" reçus avant qu'un
-  // produit créé en live soit connu de ce worker. Filet plus serré que le
-  // catalogue (secondes, pas minutes) car un acheteur n'attend pas.
-  rapidOrphanRetryMs: int("RAPID_ORPHAN_RETRY_MS", 1_000),
-  rapidOrphanMaxAgeMs: int("RAPID_ORPHAN_MAX_AGE_MS", 8_000),
+  // Mode rapid : intervalle du lot de classification LLM. Toutes les N
+  // secondes, tout ce qui s'est accumulé depuis le dernier lot est envoyé en
+  // un seul appel (lot vide = aucun appel).
+  rapidBatchIntervalMs: int("RAPID_BATCH_INTERVAL_MS", 4_000),
+  // Passe par OpenRouter (API compatible OpenAI) plutôt que l'API Anthropic
+  // directe — modèle configurable pour pouvoir changer de LLM sans toucher
+  // au code.
+  openRouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
+  openRouterBaseUrl: process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
+  rapidIntentModel: process.env.RAPID_INTENT_MODEL ?? "anthropic/claude-haiku-4.5",
 
   workerId: process.env.WORKER_ID ?? `worker-${process.pid}-${Date.now()}`,
 };
@@ -39,6 +44,7 @@ export function assertConfig() {
   const missing: string[] = [];
   if (!config.supabaseUrl) missing.push("NEXT_PUBLIC_SUPABASE_URL");
   if (!config.supabaseServiceRoleKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (!config.openRouterApiKey) missing.push("OPENROUTER_API_KEY");
   if (missing.length > 0) {
     throw new Error(`Missing required env vars: ${missing.join(", ")}`);
   }

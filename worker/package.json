@@ -12,6 +12,7 @@
     "@eulerstream/euler-websocket-sdk": "^1.0.0",
     "@supabase/supabase-js": "^2.110.7",
     "fuse.js": "^7.1.0",
+    "openai": "^6.49.0",
     "ws": "^8.21.1"
   },
   "devDependencies": {

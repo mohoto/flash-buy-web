@@ -35,7 +35,7 @@ export default async function LiveConsolePage({
     live.mode === "rapid"
       ? await supabase
           .from("live_products")
-          .select("id, name, price_cents, internal_ref, has_color, has_size, retired_at")
+          .select("id, name, price_cents, internal_ref, retired_at")
           .eq("live_id", liveId)
           .order("created_at", { ascending: true })
       : { data: null };
@@ -45,7 +45,7 @@ export default async function LiveConsolePage({
       ? await supabase
           .from("live_rapid_items")
           .select(
-            "id, live_product_id, buyer_tiktok_username, nickname, profile_picture_url, source_comment, quantity, raw_color_text, raw_size_text, resolution_state, resolution_reason, received_at, created_at"
+            "id, live_product_id, buyer_tiktok_username, nickname, profile_picture_url, source_comment, quantity, received_at, created_at"
           )
           .eq("live_id", liveId)
           .order("created_at", { ascending: false })
