@@ -546,6 +546,7 @@ export type Database = {
           live_order_item_id: string | null
           live_product_id: string | null
           nickname: string | null
+          order_number: number | null
           profile_picture_url: string | null
           quantity: number
           received_at: string
@@ -562,6 +563,7 @@ export type Database = {
           live_order_item_id?: string | null
           live_product_id?: string | null
           nickname?: string | null
+          order_number?: number | null
           profile_picture_url?: string | null
           quantity?: number
           received_at?: string
@@ -578,6 +580,7 @@ export type Database = {
           live_order_item_id?: string | null
           live_product_id?: string | null
           nickname?: string | null
+          order_number?: number | null
           profile_picture_url?: string | null
           quantity?: number
           received_at?: string
@@ -671,6 +674,7 @@ export type Database = {
           heartbeat_at: string | null
           id: string
           mode: string
+          rapid_intent_seq: number
           rapid_product_seq: number
           sale_keywords: string[]
           shop_id: string
@@ -690,6 +694,7 @@ export type Database = {
           heartbeat_at?: string | null
           id?: string
           mode?: string
+          rapid_intent_seq?: number
           rapid_product_seq?: number
           sale_keywords?: string[]
           shop_id: string
@@ -709,6 +714,7 @@ export type Database = {
           heartbeat_at?: string | null
           id?: string
           mode?: string
+          rapid_intent_seq?: number
           rapid_product_seq?: number
           sale_keywords?: string[]
           shop_id?: string
@@ -1364,6 +1370,10 @@ export type Database = {
           p_target: string
         }
         Returns: Json
+      }
+      assign_rapid_item_order_number: {
+        Args: { p_item_id: string; p_live_id: string }
+        Returns: number
       }
       create_and_activate_live_product: {
         Args: {

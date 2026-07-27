@@ -1,3 +1,11 @@
+import { config as loadDotenv } from "dotenv";
+
+// Charge worker/.env.local en dev pour ne pas avoir à sourcer le fichier
+// manuellement à chaque lancement. En production (Railway), ce fichier
+// n'existe pas — dotenv échoue silencieusement et process.env vient déjà de
+// l'environnement fourni par la plateforme, sans effet de bord.
+loadDotenv({ path: new URL("../.env.local", import.meta.url).pathname });
+
 function int(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;

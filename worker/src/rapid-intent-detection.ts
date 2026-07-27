@@ -13,17 +13,32 @@ export type BatchComment = { id: string; text: string };
 export type ClassifiedComment = { id: string; isPurchaseIntent: boolean };
 
 const SYSTEM_PROMPT = `Tu analyses des commentaires postés pendant un live TikTok de vente.
-Pour chaque commentaire, indique s'il exprime une intention d'achat (le
-buyer veut commander/réserver/prendre l'article actuellement en vente),
-quelle que soit la formulation, l'orthographe ou la politesse employée.
+Pour chaque commentaire, indique s'il exprime une NOUVELLE intention d'achat
+(le buyer veut commander/réserver/prendre l'article actuellement en vente
+maintenant), quelle que soit la formulation, l'orthographe ou la politesse
+employée.
 
 Ignore complètement la couleur, la taille et la quantité mentionnées : ces
 détails n'ont aucune importance pour cette tâche, seule l'existence d'une
 intention d'achat compte.
 
-Un simple salut, une question sur le prix ou la livraison, un compliment,
-ou tout commentaire qui n'exprime pas la volonté de prendre l'article
-n'est PAS une intention d'achat.`;
+NE SONT PAS des intentions d'achat (réponds false pour ces cas) :
+- Une confirmation qu'un paiement a DÉJÀ été effectué (ex: "c'est payé",
+  "payé pour ma part", "j'ai payé", "réglé") — c'est un accusé de paiement
+  après coup, pas une nouvelle intention.
+- Une référence de commande, un numéro, ou un montant isolé sans verbe
+  d'intention (ex: "539", "532 10€", "réf 12").
+- Une question sur la disponibilité, l'essayage, ou une taille pour
+  quelqu'un d'autre (ex: "tu peux essayer en L stp", "il te reste
+  d'autre... ?", "ta réf que X prend").
+- Une conversation entre spectateurs qui ne concerne pas directement le
+  buyer qui écrit (ex: relayer une demande pour une tierce personne).
+- Un simple salut, une question sur le prix ou la livraison, un compliment.
+
+Si tu hésites entre "confirmation de paiement" et "nouvelle intention",
+privilégie "pas une intention d'achat" (false) — un faux négatif est
+préférable à un faux positif ici : le vendeur perd un ordre non-détecté,
+mais un faux positif pollue son flux avec des commandes fantômes.`;
 
 const CLASSIFY_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
   type: "function",

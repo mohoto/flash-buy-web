@@ -45,7 +45,7 @@ export default async function LiveConsolePage({
       ? await supabase
           .from("live_rapid_items")
           .select(
-            "id, live_product_id, buyer_tiktok_username, nickname, profile_picture_url, source_comment, quantity, received_at, created_at"
+            "id, live_product_id, buyer_tiktok_username, nickname, profile_picture_url, source_comment, quantity, order_number, received_at, created_at"
           )
           .eq("live_id", liveId)
           .order("created_at", { ascending: false })
@@ -126,7 +126,7 @@ export default async function LiveConsolePage({
         </div>
         {(live.status === "live" || isScheduled) && (
           <form action={endLive.bind(null, liveId)}>
-            <Button type="submit">
+            <Button type="submit" variant={live.status === "live" ? "success" : "default"}>
               {live.status === "live" ? "Terminer le live" : "Annuler"}
             </Button>
           </form>

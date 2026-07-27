@@ -125,6 +125,18 @@ pnpm run types:gen      # regenerate lib/database.types.ts — otherwise silent 
   in the schema, but no Stripe call is made anywhere yet. Future work: Stripe Connect (Express
   accounts), Checkout, `/api/webhooks/stripe`.
 
+## Déploiement du worker
+
+Le worker Railway ne se met à jour que sur push vers `main` (déploiement
+automatique). **Tout changement dans `/worker` doit être commité ET poussé**
+— sans ça, le worker en production continue de tourner sur l'ancien code
+indéfiniment, silencieusement (aucune erreur visible tant qu'un vendeur ne
+teste pas la fonctionnalité changée). Si le changement ajoute une nouvelle
+variable d'environnement requise, elle doit être configurée sur Railway
+(service `flassh-buy-worker-v2`) **avant** le push, sinon le worker crashe au
+démarrage (`assertConfig()`) et les modes existants (catalog/freeform) sont
+aussi coupés.
+
 ## Environment variables
 
 See `.env.example` at the repo root (web) and its Worker section (worker env vars:

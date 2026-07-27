@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { AnimatePresence, motion } from "motion/react";
-import { Radio } from "lucide-react";
+import { Radio, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +18,7 @@ import {
   createAndActivateRapidProduct,
   reactivateRapidProduct,
   assignRapidItemToProduct,
+  unassignRapidItem,
   deleteRapidItem,
 } from "./rapid-actions";
 
@@ -37,6 +38,7 @@ type RapidItem = {
   profile_picture_url: string | null;
   source_comment: string;
   quantity: number;
+  order_number: number | null;
   received_at: string;
   created_at: string;
 };
@@ -62,9 +64,11 @@ export function RapidConsoleClient({
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
+    console.log("[rapid-debug] effect mounted for liveId", liveId);
     const supabase = createClient();
 
     const refetch = async () => {
+      console.log("[rapid-debug] refetch triggered");
       const [{ data: liveProducts }, { data: rapidItems }] = await Promise.all([
         supabase
           .from("live_products")
@@ -74,7 +78,7 @@ export function RapidConsoleClient({
         supabase
           .from("live_rapid_items")
           .select(
-            "id, live_product_id, buyer_tiktok_username, nickname, profile_picture_url, source_comment, quantity, received_at, created_at"
+            "id, live_product_id, buyer_tiktok_username, nickname, profile_picture_url, source_comment, quantity, order_number, received_at, created_at"
           )
           .eq("live_id", liveId)
           .order("created_at", { ascending: false }),
@@ -96,9 +100,12 @@ export function RapidConsoleClient({
         { event: "*", schema: "public", table: "live_rapid_items", filter: `live_id=eq.${liveId}` },
         refetch
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("[rapid-debug] channel status:", status);
+      });
 
     return () => {
+      console.log("[rapid-debug] effect cleanup for liveId", liveId);
       supabase.removeChannel(channel);
     };
   }, [liveId]);
@@ -226,7 +233,7 @@ function RapidCreationBar({ liveId, nextSeqHint }: { liveId: string; nextSeqHint
           </Field>
         </div>
 
-        <Button onClick={submit} disabled={isPending} className="w-full">
+        <Button onClick={submit} disabled={isPending} variant="success" className="w-full">
           <Radio />
           À l&apos;antenne
         </Button>
@@ -436,15 +443,21 @@ function RapidIntentCard({
           <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
             @{item.buyer_tiktok_username}
           </p>
+          {item.order_number !== null && (
+            <Badge variant="secondary" size="lg" className="text-base font-bold">
+              #{item.order_number}
+            </Badge>
+          )}
           <Badge variant="success">Détecté</Badge>
-          <button
+          <Button
+            size="sm"
+            variant="secondary"
             onClick={() => startTransition(() => deleteRapidItem(liveId, item.id))}
             disabled={isPending}
-            className="shrink-0 text-muted-foreground hover:text-destructive"
-            aria-label="Supprimer"
+            className="shrink-0"
           >
-            ×
-          </button>
+            Supprimer
+          </Button>
         </div>
 
         <p className="truncate text-xs text-muted-foreground">
@@ -452,9 +465,19 @@ function RapidIntentCard({
         </p>
 
         {assignedProduct ? (
-          <p className="text-sm text-foreground">
-            {item.quantity}× {assignedProduct.name} ({assignedProduct.internal_ref})
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm text-foreground">
+              {item.quantity}× {assignedProduct.name} ({assignedProduct.internal_ref})
+            </p>
+            <button
+              onClick={() => startTransition(() => unassignRapidItem(liveId, item.id))}
+              disabled={isPending}
+              className="shrink-0 text-muted-foreground hover:text-destructive"
+              aria-label="Retirer le produit assigné"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
         ) : (
           <p className="rounded border border-dashed p-2 text-center text-xs text-muted-foreground">
             Glisser un produit ici
