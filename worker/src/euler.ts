@@ -87,6 +87,18 @@ export function connectToLive(
 
   ws.on("message", (raw) => {
     const envelopes = parseIncomingMessages(raw);
+    // DEBUG TEMPORAIRE (2026-07-28) : diagnostic "commentaires n'arrivent plus" —
+    // à retirer une fois la cause confirmée.
+    console.log(
+      JSON.stringify({
+        level: "debug",
+        msg: "euler frame received",
+        tiktokUsername,
+        rawByteLength: raw.toString().length,
+        envelopeTypes: envelopes.map((e) => e.type),
+        rawSample: envelopes.length === 0 ? raw.toString().slice(0, 500) : undefined,
+      })
+    );
 
     for (const envelope of envelopes) {
       if (envelope.type === "WebcastChatMessage") {
