@@ -55,12 +55,21 @@ export async function releaseLive(liveId: string) {
     .eq("worker_id", config.workerId);
 }
 
-export async function heartbeat(liveId: string) {
-  await supabase
+// Retourne le status actuel du live après écriture du heartbeat — sert au
+// worker à détecter qu'un live a été terminé par un autre chemin (ex. le
+// vendeur clique "Terminer le live" côté dashboard) sans requête
+// supplémentaire : ce endLive() ne notifie jamais le worker directement (pas
+// de subscription Realtime côté worker), donc sans ce contrôle la session
+// Euler continuerait de tourner indéfiniment après un live marqué "ended".
+export async function heartbeat(liveId: string): Promise<string | null> {
+  const { data } = await supabase
     .from("lives")
     .update({ heartbeat_at: new Date().toISOString() })
     .eq("id", liveId)
-    .eq("worker_id", config.workerId);
+    .eq("worker_id", config.workerId)
+    .select("status")
+    .maybeSingle();
+  return data?.status ?? null;
 }
 
 // Auto-réparation : remet en file les lives dont le heartbeat est périmé,

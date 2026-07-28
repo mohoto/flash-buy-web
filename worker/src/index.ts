@@ -91,10 +91,23 @@ async function claimLoop() {
   setTimeout(claimLoop, config.claimStaggerMs);
 }
 
-// Heartbeat de tous les lives actifs sur cette instance.
+// Heartbeat de tous les lives actifs sur cette instance — vérifie au passage
+// que chacun est toujours `status = 'live'` en base : un live terminé par un
+// autre chemin (ex. le vendeur clique "Terminer le live" côté dashboard) ne
+// notifie jamais le worker directement, donc sans ce contrôle la session
+// Euler resterait ouverte indéfiniment après la fin affichée côté vendeur.
 function startHeartbeatLoop() {
   return setInterval(async () => {
-    await Promise.all([...activeSessions.keys()].map(heartbeat));
+    await Promise.all(
+      [...activeSessions.entries()].map(async ([liveId, session]) => {
+        const status = await heartbeat(liveId);
+        if (status !== null && status !== "live") {
+          log("info", "live ended externally, stopping session", { liveId, status });
+          session.connection.disconnect();
+          await onLiveEnded(liveId);
+        }
+      })
+    );
   }, config.heartbeatIntervalMs);
 }
 
