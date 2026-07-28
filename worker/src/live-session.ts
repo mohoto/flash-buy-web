@@ -11,6 +11,18 @@ export type LiveSession = {
   wsOpenFailures: number;
 };
 
+// Backoff exponentiel plafonné entre deux tentatives de reconnexion Euler
+// après une coupure non définitive (réseau, erreur serveur, timeout...) —
+// retry indéfiniment tant que le live n'est pas marqué `ended` en base,
+// jamais de nombre de tentatives limité (une panne réseau prolongée ne doit
+// jamais clore un live à tort).
+const RECONNECT_BASE_DELAY_MS = 2_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+
+function reconnectDelayMs(attempt: number): number {
+  return Math.min(RECONNECT_BASE_DELAY_MS * 2 ** attempt, RECONNECT_MAX_DELAY_MS);
+}
+
 // Debounce en mémoire pour éviter de saturer Supabase en écriture sous fort
 // trafic (spectateur qui spam les commentaires, viewerCount envoyé plusieurs
 // fois par seconde par TikTok) — la fraîcheur perçue sur le dashboard reste
@@ -63,6 +75,15 @@ function closeCommentChannel(liveId: string) {
   commentChannels.delete(liveId);
 }
 
+// Le live a-t-il été refermé par un autre chemin pendant qu'on retentait la
+// connexion (ex. le vendeur clique "Terminer le live" manuellement) ? Vérifié
+// avant chaque tentative de reconnexion pour ne jamais reconnecter un live
+// que le vendeur a explicitement arrêté.
+async function isLiveStillActive(liveId: string): Promise<boolean> {
+  const { data } = await supabase.from("lives").select("status").eq("id", liveId).single();
+  return data?.status === "live";
+}
+
 export async function startLiveSession(
   liveId: string,
   shopId: string,
@@ -85,32 +106,91 @@ export async function startLiveSession(
   }
   const saleKeywords = liveRow?.sale_keywords;
 
+  let reconnectAttempt = 0;
+  let stopped = false;
+  let currentConnection: EulerConnection | null = null;
+
   const session: LiveSession = {
     liveId,
     shopId,
     wsOpenFailures: 0,
-    connection: null as unknown as EulerConnection,
+    // Stable across reconnects : ferme la connexion Euler courante et
+    // empêche tout retry planifié de repartir ensuite (ex. arrêt volontaire
+    // du worker via shutdown() dans index.ts).
+    connection: {
+      disconnect: () => {
+        stopped = true;
+        currentConnection?.disconnect();
+      },
+    },
   };
 
-  session.connection = connectToLive(tiktokUsername, {
-    onComment: (comment) => handleComment(liveId, shopId, mode, comment, saleKeywords),
-    onViewerCount: (viewerCount) => handleViewerCount(liveId, viewerCount),
-    onDisconnect: async (reason) => {
-      console.log(JSON.stringify({ level: "info", msg: "live session disconnect", liveId, tiktokUsername, reason }));
-      await supabase
-        .from("lives")
-        .update({ status: "ended", ended_at: new Date().toISOString() })
-        .eq("id", liveId);
-      await supabase.from("live_viewers").delete().eq("live_id", liveId);
-      clearDebounceState(liveId);
-      closeCommentChannel(liveId);
-      onEnded(liveId);
-    },
-    onError: (err) => {
-      session.wsOpenFailures += 1;
-      onWsOpenFailure(liveId, err);
-    },
-  });
+  const markLiveEnded = async (reason: string) => {
+    console.log(JSON.stringify({ level: "info", msg: "live session ended", liveId, tiktokUsername, reason }));
+    stopped = true;
+    await supabase
+      .from("lives")
+      .update({ status: "ended", ended_at: new Date().toISOString() })
+      .eq("id", liveId);
+    await supabase.from("live_viewers").delete().eq("live_id", liveId);
+    clearDebounceState(liveId);
+    closeCommentChannel(liveId);
+    onEnded(liveId);
+  };
+
+  const connect = () => {
+    // Une erreur websocket ("error") est presque toujours suivie d'un "close"
+    // pour le même incident côté module `ws` — sans ce flag, les deux
+    // événements déclencheraient chacun un cycle de reconnexion, ouvrant deux
+    // websockets concurrents pour le même live.
+    let settled = false;
+
+    currentConnection = connectToLive(tiktokUsername, {
+      onOpen: () => {
+        reconnectAttempt = 0;
+      },
+      onComment: (comment) => handleComment(liveId, shopId, mode, comment, saleKeywords),
+      onViewerCount: (viewerCount) => handleViewerCount(liveId, viewerCount),
+      onLiveEnded: (reason) => {
+        if (stopped || settled) return;
+        settled = true;
+        markLiveEnded(reason);
+      },
+      onDisconnected: async (reason) => {
+        if (stopped || settled) return;
+        settled = true;
+        session.wsOpenFailures += 1;
+        onWsOpenFailure(liveId, new Error(reason));
+
+        if (!(await isLiveStillActive(liveId))) {
+          // Terminé entre-temps par un autre chemin (ex. le vendeur a cliqué
+          // "Terminer le live") — ne jamais reconnecter un live déjà fermé.
+          stopped = true;
+          clearDebounceState(liveId);
+          closeCommentChannel(liveId);
+          onEnded(liveId);
+          return;
+        }
+
+        const delay = reconnectDelayMs(reconnectAttempt);
+        reconnectAttempt += 1;
+        console.log(JSON.stringify({
+          level: "info",
+          msg: "euler websocket disconnected, retrying",
+          liveId,
+          tiktokUsername,
+          reason,
+          attempt: reconnectAttempt,
+          delayMs: delay,
+        }));
+        setTimeout(() => {
+          if (!stopped) connect();
+        }, delay);
+      },
+    });
+  };
+
+  connect();
 
   return session;
 }

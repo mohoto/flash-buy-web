@@ -20,6 +20,16 @@ export type EulerConnection = {
   disconnect: () => void;
 };
 
+// Codes de fermeture signifiant que le live TikTok est réellement terminé
+// (le streamer a coupé, ou n'était déjà plus en live) — toute autre
+// fermeture non volontaire (erreur réseau, timeout, erreur serveur Euler...)
+// est une coupure à retenter, pas une fin de live.
+const LIVE_ENDED_CLOSE_CODES: number[] = [ClientCloseCode.STREAM_END, ClientCloseCode.NOT_LIVE];
+
+export function isLiveEndedCloseCode(code: number): boolean {
+  return LIVE_ENDED_CLOSE_CODES.includes(code);
+}
+
 // Confirmé sur un live réel : Euler bundle les événements par défaut
 // (bundleEvents: true côté SDK) — chaque frame WebSocket contient
 // `{ messages: [{ type, data }, ...], timestamp }`, jamais un message isolé
@@ -46,10 +56,15 @@ function parseIncomingMessages(raw: WebSocket.RawData): DecodedEnvelope[] {
 export function connectToLive(
   tiktokUsername: string,
   handlers: {
+    onOpen?: () => void;
     onComment: (comment: LiveComment) => void;
     onViewerCount: (viewerCount: number) => void;
-    onDisconnect: (reason: string) => void;
-    onError: (error: Error) => void;
+    // Le streamer a réellement arrêté le live (ou n'était déjà plus en
+    // live) — définitif, jamais retenté.
+    onLiveEnded: (reason: string) => void;
+    // Websocket coupé pour toute autre raison (réseau, erreur serveur
+    // Euler, timeout...) — l'appelant décide de retenter la connexion.
+    onDisconnected: (reason: string) => void;
   }
 ): EulerConnection {
   const url = createWebSocketUrl({
@@ -61,6 +76,7 @@ export function connectToLive(
 
   ws.on("open", () => {
     console.log(JSON.stringify({ level: "info", msg: "euler websocket opened", tiktokUsername }));
+    handlers.onOpen?.();
   });
 
   ws.on("message", (raw) => {
@@ -81,7 +97,7 @@ export function connectToLive(
       }
 
       if (envelope.type === "tiktok.disconnect") {
-        handlers.onDisconnect("tiktok.disconnect");
+        handlers.onLiveEnded("tiktok.disconnect");
       }
 
       if (envelope.type === "WebcastRoomUserSeqMessage") {
@@ -92,16 +108,17 @@ export function connectToLive(
   });
 
   ws.on("close", (code) => {
-    if (code === ClientCloseCode.STREAM_END || code === ClientCloseCode.NOT_LIVE) {
-      handlers.onDisconnect(`close_${code}`);
+    if (isLiveEndedCloseCode(code)) {
+      handlers.onLiveEnded(`close_${code}`);
     } else if (code !== ClientCloseCode.NORMAL) {
-      // Fermeture inattendue : traité comme un échec d'ouverture par l'appelant
-      // (incrémente ws_open_failures) plutôt qu'une fin de live normale.
-      handlers.onError(new Error(`WebSocket closed unexpectedly (code ${code})`));
+      // Toute fermeture inattendue qui n'indique pas explicitement une fin
+      // de live (erreur réseau, erreur serveur Euler, timeout...) — l'appelant
+      // décide de retenter la connexion plutôt que de clore le live.
+      handlers.onDisconnected(`close_${code}`);
     }
   });
 
-  ws.on("error", (err) => handlers.onError(err));
+  ws.on("error", (err) => handlers.onDisconnected(err.message));
 
   return {
     disconnect: () => ws.close(ClientCloseCode.NORMAL),
