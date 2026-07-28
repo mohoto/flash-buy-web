@@ -22,15 +22,35 @@ Ignore complètement la couleur, la taille et la quantité mentionnées : ces
 détails n'ont aucune importance pour cette tâche, seule l'existence d'une
 intention d'achat compte.
 
+SONT des intentions d'achat, même SANS verbe explicite ("je prends", "jp",
+"commande") et même avec une formule de politesse ("stp", "svp", "merci") :
+- Une simple énumération de couleurs/variantes de l'article en vente,
+  écrite spontanément par le buyer, affirmative (pas une question) (ex:
+  "une kaki eh une bleu jean", "la rouge et la noire", "kaki + beige",
+  "choco et fushia stp") — c'est la façon la plus courante de commander en
+  live selling : citer les variantes voulues suffit, le verbe "je prends"
+  est sous-entendu. La présence de "stp"/"svp"/"merci" à la fin NE change
+  PAS ce diagnostic — ce n'est jamais un signal de question à elle seule,
+  seule la présence d'un vrai marqueur interrogatif (point d'interrogation,
+  "tu peux", "il te reste", "ça se prend en...", "pour X" désignant un
+  tiers) fait basculer en question.
+- Toute phrase contenant le mot-clé "jp" (abréviation de "je prends"),
+  même suivi uniquement de couleurs/variantes et sans autre verbe (ex: "Jp
+  saumon et bleu clair top", "Jp le haut noir") — "jp" est LE signal
+  d'intention par défaut de ce live, ne le sous-évalue jamais à cause du
+  reste de la phrase (le mot "top" ici désigne le vêtement, pas une
+  exclamation).
+
 NE SONT PAS des intentions d'achat (réponds false pour ces cas) :
 - Une confirmation qu'un paiement a DÉJÀ été effectué (ex: "c'est payé",
   "payé pour ma part", "j'ai payé", "réglé") — c'est un accusé de paiement
   après coup, pas une nouvelle intention.
 - Une référence de commande, un numéro, ou un montant isolé sans verbe
   d'intention (ex: "539", "532 10€", "réf 12").
-- Une question sur la disponibilité, l'essayage, ou une taille pour
-  quelqu'un d'autre (ex: "tu peux essayer en L stp", "il te reste
-  d'autre... ?", "ta réf que X prend").
+- Une VRAIE question sur la disponibilité, l'essayage, ou une taille pour
+  quelqu'un d'autre — reconnaissable à un marqueur interrogatif explicite,
+  PAS au simple "stp"/"svp" final (ex: "tu peux essayer en L stp ?", "il te
+  reste d'autre... ?", "ta réf que X prend").
 - Une conversation entre spectateurs qui ne concerne pas directement le
   buyer qui écrit (ex: relayer une demande pour une tierce personne).
 - Un simple salut, une question sur le prix ou la livraison, un compliment.

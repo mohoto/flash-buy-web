@@ -161,7 +161,14 @@ async function handleComment(
   await trackActiveCommenter(liveId, comment);
 
   if (mode === "rapid") {
-    enqueueRapidComment(liveId, shopId, comment);
+    // Pré-filtre déterministe : un commentaire contenant le mot-clé de vente
+    // du live (ex: "jp") est TOUJOURS une intention d'achat, sans dépendre
+    // du classificateur LLM (rapid-intent-detection.ts) qui peut occasionnellement
+    // rater un cas explicite. Les commentaires sans mot-clé (ex: énumération
+    // implicite de couleurs "une kaki eh une bleu jean") passent quand même
+    // par le LLM, seul moyen de les détecter.
+    const hasKeyword = parseSaleComment(comment.text, [], saleKeywords).isSale;
+    enqueueRapidComment(liveId, shopId, comment, hasKeyword);
     return;
   }
 

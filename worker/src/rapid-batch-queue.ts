@@ -9,6 +9,9 @@ type QueuedComment = {
   liveId: string;
   shopId: string;
   comment: LiveComment;
+  // true si le mot-clé de vente du live (ex: "jp") est présent — détection
+  // déterministe faite en amont (live-session.ts), court-circuite le LLM.
+  hasKeyword: boolean;
 };
 
 const queueByLive = new Map<string, QueuedComment[]>();
@@ -42,9 +45,14 @@ export function untrackRapidLive(liveId: string): void {
   }
 }
 
-export function enqueueRapidComment(liveId: string, shopId: string, comment: LiveComment): void {
+export function enqueueRapidComment(
+  liveId: string,
+  shopId: string,
+  comment: LiveComment,
+  hasKeyword: boolean
+): void {
   const list = queueByLive.get(liveId) ?? [];
-  list.push({ id: randomUUID(), liveId, shopId, comment });
+  list.push({ id: randomUUID(), liveId, shopId, comment, hasKeyword });
   queueByLive.set(liveId, list);
 }
 
@@ -80,25 +88,46 @@ async function flushOneLive(liveId: string) {
     return;
   }
 
+  // Court-circuit déterministe : mot-clé présent = persisté directement,
+  // aucun appel LLM, aucun risque de faux négatif de classification pour ces
+  // commentaires-là (cf. bug observé : "Jp saumon et bleu clair top" raté par
+  // le LLM malgré "jp" explicite). Seuls les commentaires sans mot-clé (ex.
+  // énumération implicite de couleurs) passent par le classificateur.
+  const keywordMatches = pending.filter((p) => p.hasKeyword);
+  const needsClassification = pending.filter((p) => !p.hasKeyword);
+
+  if (keywordMatches.length > 0) {
+    await persistDetectedIntents(liveId, tracked.shopId, keywordMatches);
+  }
+
+  if (needsClassification.length === 0) {
+    queueByLive.delete(liveId);
+    return;
+  }
+
   let classified: ClassifiedComment[];
   try {
-    classified = await classifyPurchaseIntents(pending.map((p) => ({ id: p.id, text: p.comment.text })));
+    classified = await classifyPurchaseIntents(
+      needsClassification.map((p) => ({ id: p.id, text: p.comment.text }))
+    );
   } catch (err) {
     // Le lot entier échoue ensemble (un seul appel API classifiant tout le
-    // lot) : la file reste intacte, mêmes commentaires retentés au tick
-    // suivant — aucun commentaire perdu, aucun doublon.
+    // lot) : la file reste intacte (moins les keywordMatches déjà persistés
+    // ci-dessus), mêmes commentaires retentés au tick suivant — aucun
+    // commentaire perdu, aucun doublon.
     console.error(JSON.stringify({
       level: "error",
       liveId,
       msg: "rapid batch classification failed, will retry next tick",
       error: (err as Error).message,
-      batchSize: pending.length,
+      batchSize: needsClassification.length,
     }));
+    queueByLive.set(liveId, needsClassification);
     return;
   }
 
   const classifiedIds = new Set(classified.map((c) => c.id));
-  const toPersist = pending.filter((p) => {
+  const toPersist = needsClassification.filter((p) => {
     const match = classified.find((c) => c.id === p.id);
     return match?.isPurchaseIntent === true;
   });
@@ -109,7 +138,7 @@ async function flushOneLive(liveId: string) {
   // (vrai ou faux) — un id absent de la réponse (cas réponse partielle)
   // reste en file pour le prochain tick, sans jamais être renvoyé deux fois
   // au LLM une fois qu'il a reçu un verdict.
-  const remaining = pending.filter((p) => !classifiedIds.has(p.id));
+  const remaining = needsClassification.filter((p) => !classifiedIds.has(p.id));
   if (remaining.length > 0) queueByLive.set(liveId, remaining);
   else queueByLive.delete(liveId);
 }
@@ -119,13 +148,11 @@ async function persistDetectedIntents(liveId: string, shopId: string, items: Que
     const { error } = await supabase.from("live_rapid_items").insert({
       live_id: liveId,
       shop_id: shopId,
-      live_product_id: null,
       buyer_tiktok_username: item.comment.username,
       nickname: item.comment.nickname,
       profile_picture_url: item.comment.profilePictureUrl,
       source_comment: item.comment.text,
       tiktok_comment_id: item.comment.commentId,
-      quantity: 1,
       received_at: new Date().toISOString(),
     });
     if (error && error.code !== "23505") {

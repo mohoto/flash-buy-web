@@ -42,7 +42,7 @@ export function startSimulationServer(port: number) {
 
     const { data: live } = await supabase
       .from("lives")
-      .select("id, shop_id, mode")
+      .select("id, shop_id, mode, sale_keywords")
       .eq("id", liveId)
       .single();
 
@@ -58,14 +58,20 @@ export function startSimulationServer(port: number) {
         trackRapidLive(liveId, live.shop_id);
       }
 
-      enqueueRapidComment(liveId, live.shop_id, {
-        commentId: `sim-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        userId: randomUUID(),
-        username,
-        nickname: username,
-        profilePictureUrl: null,
-        text,
-      });
+      const hasKeyword = parseSaleComment(text, [], live.sale_keywords ?? undefined).isSale;
+      enqueueRapidComment(
+        liveId,
+        live.shop_id,
+        {
+          commentId: `sim-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          userId: randomUUID(),
+          username,
+          nickname: username,
+          profilePictureUrl: null,
+          text,
+        },
+        hasKeyword
+      );
 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ mode: "rapid", accepted: true }));
