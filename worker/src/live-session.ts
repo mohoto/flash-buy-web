@@ -1,7 +1,7 @@
 import { supabase } from "./supabase.js";
 import { getCatalog } from "./catalog.js";
 import { parseSaleComment } from "./parsing.js";
-import { connectToLive, type EulerConnection, type LiveComment } from "./euler.js";
+import { connectToLive, NOT_LIVE_CLOSE_CODE, type EulerConnection, type LiveComment } from "./euler.js";
 import { enqueueRapidComment } from "./rapid-batch-queue.js";
 
 export type LiveSession = {
@@ -22,6 +22,18 @@ const RECONNECT_MAX_DELAY_MS = 30_000;
 function reconnectDelayMs(attempt: number): number {
   return Math.min(RECONNECT_BASE_DELAY_MS * 2 ** attempt, RECONNECT_MAX_DELAY_MS);
 }
+
+// Un NOT_LIVE reçu dans les tout premiers instants d'une session peut être
+// une latence de propagation côté TikTok (le live vient d'être démarré par
+// le vendeur, l'API interne qu'Euler interroge n'a pas encore rattrapé) plus
+// qu'une vraie fin de live — observé en pratique : un live clos par NOT_LIVE
+// moins de 3s après son claim, alors que le vendeur affirmait le live
+// toujours actif côté app TikTok. Un nombre de tentatives limité (contraste
+// avec le retry indéfini de onDisconnected) : passé ce délai, NOT_LIVE
+// redevient un signal fiable de vraie fin.
+const EARLY_NOT_LIVE_GRACE_MS = 15_000;
+const EARLY_NOT_LIVE_MAX_RETRIES = 3;
+const EARLY_NOT_LIVE_RETRY_DELAY_MS = 3_000;
 
 // Debounce en mémoire pour éviter de saturer Supabase en écriture sous fort
 // trafic (spectateur qui spam les commentaires, viewerCount envoyé plusieurs
@@ -109,6 +121,8 @@ export async function startLiveSession(
   let reconnectAttempt = 0;
   let stopped = false;
   let currentConnection: EulerConnection | null = null;
+  const sessionStartedAt = Date.now();
+  let earlyNotLiveRetries = 0;
 
   const session: LiveSession = {
     liveId,
@@ -151,8 +165,30 @@ export async function startLiveSession(
       },
       onComment: (comment) => handleComment(liveId, shopId, mode, comment, saleKeywords),
       onViewerCount: (viewerCount) => handleViewerCount(liveId, viewerCount),
-      onLiveEnded: (reason) => {
+      onLiveEnded: (reason, code) => {
         if (stopped || settled) return;
+
+        const withinGracePeriod = Date.now() - sessionStartedAt < EARLY_NOT_LIVE_GRACE_MS;
+        if (
+          code === NOT_LIVE_CLOSE_CODE &&
+          withinGracePeriod &&
+          earlyNotLiveRetries < EARLY_NOT_LIVE_MAX_RETRIES
+        ) {
+          settled = true;
+          earlyNotLiveRetries += 1;
+          console.log(JSON.stringify({
+            level: "info",
+            msg: "NOT_LIVE shortly after claim, retrying (possible TikTok propagation delay)",
+            liveId,
+            tiktokUsername,
+            attempt: earlyNotLiveRetries,
+          }));
+          setTimeout(() => {
+            if (!stopped) connect();
+          }, EARLY_NOT_LIVE_RETRY_DELAY_MS);
+          return;
+        }
+
         settled = true;
         markLiveEnded(reason);
       },

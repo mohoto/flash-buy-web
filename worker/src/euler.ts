@@ -30,6 +30,8 @@ export function isLiveEndedCloseCode(code: number): boolean {
   return LIVE_ENDED_CLOSE_CODES.includes(code);
 }
 
+export const NOT_LIVE_CLOSE_CODE = ClientCloseCode.NOT_LIVE;
+
 // Confirmé sur un live réel : Euler bundle les événements par défaut
 // (bundleEvents: true côté SDK) — chaque frame WebSocket contient
 // `{ messages: [{ type, data }, ...], timestamp }`, jamais un message isolé
@@ -60,8 +62,12 @@ export function connectToLive(
     onComment: (comment: LiveComment) => void;
     onViewerCount: (viewerCount: number) => void;
     // Le streamer a réellement arrêté le live (ou n'était déjà plus en
-    // live) — définitif, jamais retenté.
-    onLiveEnded: (reason: string) => void;
+    // live) — définitif, jamais retenté par défaut. `code` (absent pour
+    // tiktok.disconnect, qui n'a pas de close code associé) permet à
+    // l'appelant de distinguer NOT_LIVE des autres cas s'il veut faire
+    // exception (cf. live-session.ts : NOT_LIVE juste après le claim d'un
+    // live peut être une latence de propagation TikTok, pas une vraie fin).
+    onLiveEnded: (reason: string, code?: number) => void;
     // Websocket coupé pour toute autre raison (réseau, erreur serveur
     // Euler, timeout...) — l'appelant décide de retenter la connexion.
     onDisconnected: (reason: string) => void;
@@ -109,7 +115,7 @@ export function connectToLive(
 
   ws.on("close", (code) => {
     if (isLiveEndedCloseCode(code)) {
-      handlers.onLiveEnded(`close_${code}`);
+      handlers.onLiveEnded(`close_${code}`, code);
     } else if (code !== ClientCloseCode.NORMAL) {
       // Toute fermeture inattendue qui n'indique pas explicitement une fin
       // de live (erreur réseau, erreur serveur Euler, timeout...) — l'appelant
