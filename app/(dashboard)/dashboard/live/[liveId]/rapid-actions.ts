@@ -6,9 +6,9 @@ import { getOwnShop } from "@/lib/dashboard/get-own-shop";
 
 // Création + activation atomique ("à l'antenne") via la RPC security definer
 // create_and_activate_live_product (cf. migration flassh_buy_rapid_mode) :
-// incrémente le compteur de labels internes, insère le produit et bascule
-// lives.active_product_id dans la même transaction, pour qu'un double-clic
-// sur la barre express ne puisse jamais laisser deux produits actifs.
+// incrémente le compteur de labels internes et insère le produit — plusieurs
+// produits peuvent être actifs simultanément, cette action n'en retire jamais
+// aucun (retired_at IS NULL est la seule source de vérité pour "actif").
 export async function createAndActivateRapidProduct(liveId: string, formData: FormData) {
   const shop = await getOwnShop();
   const supabase = await createClient();
@@ -43,89 +43,146 @@ export async function createAndActivateRapidProduct(liveId: string, formData: Fo
   revalidatePath(`/dashboard/live/${liveId}`);
 }
 
-// Retrait manuel sans activer de remplaçant (ex. fin de segment, rien de
-// prêt à passer à l'antenne) : le produit reste visible dans "produits
-// précédents", seul lives.active_product_id repasse à null.
-export async function retireActiveProduct(liveId: string) {
+// Retrait manuel d'UN produit actif précis (ex. rupture de stock, fin de
+// segment) — les autres produits actifs restent inchangés, le produit retiré
+// reste visible dans "produits précédents".
+export async function retireRapidProduct(liveId: string, productId: string) {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
-  const { data: live } = await supabase
-    .from("lives")
-    .select("active_product_id")
-    .eq("id", liveId)
-    .eq("shop_id", shop.id)
-    .single();
-
-  if (live?.active_product_id) {
-    await supabase
-      .from("live_products")
-      .update({ retired_at: new Date().toISOString() })
-      .eq("id", live.active_product_id);
-  }
-
   await supabase
-    .from("lives")
-    .update({ active_product_id: null })
-    .eq("id", liveId)
+    .from("live_products")
+    .update({ retired_at: new Date().toISOString() })
+    .eq("id", productId)
+    .eq("live_id", liveId)
     .eq("shop_id", shop.id);
 
   revalidatePath(`/dashboard/live/${liveId}`);
 }
 
 // Remet un produit précédent à l'antenne (ex. rupture de stock résolue,
-// retour sur un article) — retire l'actif courant s'il y en a un, réactive
-// celui choisi. Ne repasse pas retired_at à null pour le produit
-// actuellement actif si aucun n'est actif (cas déjà géré par le null-check).
+// retour sur un article) — s'ajoute aux produits déjà actifs, n'en retire
+// aucun.
 export async function reactivateRapidProduct(liveId: string, productId: string) {
   const shop = await getOwnShop();
   const supabase = await createClient();
-
-  const { data: live } = await supabase
-    .from("lives")
-    .select("active_product_id")
-    .eq("id", liveId)
-    .eq("shop_id", shop.id)
-    .single();
-
-  if (live?.active_product_id && live.active_product_id !== productId) {
-    await supabase
-      .from("live_products")
-      .update({ retired_at: new Date().toISOString() })
-      .eq("id", live.active_product_id);
-  }
 
   await supabase
     .from("live_products")
     .update({ retired_at: null })
     .eq("id", productId)
-    .eq("shop_id", shop.id);
-
-  await supabase
-    .from("lives")
-    .update({ active_product_id: productId })
-    .eq("id", liveId)
+    .eq("live_id", liveId)
     .eq("shop_id", shop.id);
 
   revalidatePath(`/dashboard/live/${liveId}`);
 }
 
-// Assignation par glisser-déposer : rattache une intention d'achat détectée
-// par l'IA (jusque-là non assignée, ou déjà assignée à un autre produit) au
-// produit déposé dessus. Trois cas :
-// - Pas encore assignée : crée la ligne panier, quantité 1.
-// - Déjà assignée au MÊME produit (le vendeur re-glisse pour dire "il en
-//   veut 2") : incrémente la quantité de la ligne existante au lieu de la
-//   remplacer.
-// - Déjà assignée à un AUTRE produit : remplace (supprime l'ancienne ligne,
-//   recrée avec quantité 1) — le vendeur corrige une erreur d'assignation.
-export async function assignRapidItemToProduct(liveId: string, itemId: string, productId: string) {
+// Correction de nom/prix en cours de live (ex. erreur de saisie, changement
+// de dernière minute) — ne touche pas aux live_order_items déjà créés : les
+// intentions déjà assignées gardent le nom/prix qui était affiché au moment
+// du glisser-déposer, seules les prochaines assignations verront la mise à
+// jour. Le nom n'est mis à jour que si non vide (jamais de nom vide en base).
+export async function updateRapidProductPrice(
+  liveId: string,
+  productId: string,
+  priceEuros: number,
+  name?: string
+) {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
+  if (!Number.isFinite(priceEuros) || priceEuros <= 0) return;
+
+  const trimmedName = name?.trim();
+
+  await supabase
+    .from("live_products")
+    .update({
+      price_cents: Math.round(priceEuros * 100),
+      ...(trimmedName ? { name: trimmedName } : {}),
+    })
+    .eq("id", productId)
+    .eq("shop_id", shop.id);
+
+  revalidatePath(`/dashboard/live/${liveId}`);
+}
+
+// Remises par quantité exacte (1 à 8) + remise simple (indépendante de la
+// quantité), en euros, configurées côté carte "à l'antenne" — remplace
+// intégralement la table de paliers et la remise simple à chaque sauvegarde
+// (un champ vide/0 retire le palier / annule la remise simple). Ne touche
+// pas aux live_order_items déjà créés, même logique que updateRapidProductPrice.
+export async function updateRapidProductDiscountTiers(
+  liveId: string,
+  productId: string,
+  formData: FormData
+) {
+  const shop = await getOwnShop();
+  const supabase = await createClient();
+
+  const tiers: Record<string, number> = {};
+  for (let qty = 1; qty <= 8; qty++) {
+    const raw = formData.get(`discount_${qty}`);
+    const euros = raw === null || raw === "" ? null : Number(raw);
+    if (euros !== null && Number.isFinite(euros) && euros > 0) {
+      tiers[String(qty)] = Math.round(euros * 100);
+    }
+  }
+
+  const rawSimple = formData.get("discount_simple");
+  const simpleEuros = rawSimple === null || rawSimple === "" ? null : Number(rawSimple);
+  const simpleDiscountCents =
+    simpleEuros !== null && Number.isFinite(simpleEuros) && simpleEuros > 0
+      ? Math.round(simpleEuros * 100)
+      : 0;
+
+  await supabase
+    .from("live_products")
+    .update({ discount_tiers_cents: tiers, simple_discount_cents: simpleDiscountCents })
+    .eq("id", productId)
+    .eq("shop_id", shop.id);
+
+  revalidatePath(`/dashboard/live/${liveId}`);
+}
+
+// Lecture défensive de discount_tiers_cents (typé Json côté généré, plus
+// large qu'un Record<string, number>) — correspondance exacte sur la
+// quantité en priorité ; si aucun palier n'est configuré pour cette
+// quantité, retombe sur la remise simple (indépendante de la quantité).
+function lookupDiscountCents(tiers: unknown, quantity: number, simpleDiscountCents: number): number {
+  if (tiers && typeof tiers === "object" && !Array.isArray(tiers)) {
+    const value = (tiers as Record<string, unknown>)[String(quantity)];
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return Math.round(value);
+    }
+  }
+  return Number.isFinite(simpleDiscountCents) && simpleDiscountCents > 0
+    ? Math.round(simpleDiscountCents)
+    : 0;
+}
+
+// Assignation par glisser-déposer : rattache une intention d'achat détectée
+// par l'IA au produit déposé dessus, en AJOUTANT une ligne (jamais de
+// remplacement) — une intention peut porter plusieurs produits différents.
+// Deux cas :
+// - Ce produit n'est pas encore assigné à cette intention : nouvelle ligne
+//   de liaison (live_rapid_item_products) + nouvelle ligne panier.
+// - Déjà assigné (le vendeur re-glisse le MÊME produit pour dire "il en
+//   veut 2") : incrémente la quantité de la ligne existante.
+export async function assignRapidItemToProduct(
+  liveId: string,
+  itemId: string,
+  productId: string,
+  quantity: number = 1
+) {
+  const shop = await getOwnShop();
+  const supabase = await createClient();
+
+  const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? Math.round(quantity) : 1;
+
   const { data: product } = await supabase
     .from("live_products")
-    .select("id, name, price_cents, internal_ref")
+    .select("id, name, price_cents, internal_ref, discount_tiers_cents, simple_discount_cents")
     .eq("id", productId)
     .eq("shop_id", shop.id)
     .single();
@@ -133,49 +190,20 @@ export async function assignRapidItemToProduct(liveId: string, itemId: string, p
 
   const { data: rapidItem } = await supabase
     .from("live_rapid_items")
-    .select("id, buyer_tiktok_username, source_comment, live_product_id, live_order_item_id, live_order_id")
+    .select("id, buyer_tiktok_username, source_comment, live_order_id")
     .eq("id", itemId)
     .eq("shop_id", shop.id)
     .single();
   if (!rapidItem) return;
 
-  if (rapidItem.live_product_id === productId && rapidItem.live_order_item_id && rapidItem.live_order_id) {
-    const { data: existingItem } = await supabase
-      .from("live_order_items")
-      .select("quantity")
-      .eq("id", rapidItem.live_order_item_id)
-      .single();
-    if (existingItem) {
-      const newQuantity = existingItem.quantity + 1;
-      await supabase
-        .from("live_order_items")
-        .update({ quantity: newQuantity })
-        .eq("id", rapidItem.live_order_item_id);
-      await supabase
-        .from("live_rapid_items")
-        .update({ quantity: newQuantity })
-        .eq("id", itemId);
-      await supabase.rpc("assign_rapid_item_order_number", { p_live_id: liveId, p_item_id: itemId });
-      await recomputeOrderTotal(rapidItem.live_order_id);
-      revalidatePath(`/dashboard/live/${liveId}`);
-      return;
-    }
-  }
-
-  if (rapidItem.live_order_item_id) {
-    await supabase.from("live_order_items").delete().eq("id", rapidItem.live_order_item_id);
-  }
-
-  let { data: order } = await supabase
-    .from("live_orders")
-    .select("id")
-    .eq("live_id", liveId)
-    .eq("buyer_tiktok_username", rapidItem.buyer_tiktok_username)
-    .in("status", ["pending", "validated"])
-    .maybeSingle();
-
-  if (!order) {
-    const { data: created } = await supabase
+  // Une commande par intention d'achat (pas par acheteur) : chaque carte
+  // d'intention = une étiquette = une live_order, même si un même acheteur a
+  // plusieurs intentions dans le live. Créée une seule fois à la première
+  // assignation de cette intention, puis réutilisée pour tous les produits
+  // qui lui sont assignés ensuite.
+  let orderId = rapidItem.live_order_id;
+  if (!orderId) {
+    const { data: created, error: createOrderError } = await supabase
       .from("live_orders")
       .insert({
         live_id: liveId,
@@ -184,74 +212,113 @@ export async function assignRapidItemToProduct(liveId: string, itemId: string, p
       })
       .select("id")
       .single();
-    order = created;
+    if (createOrderError || !created) {
+      console.error("assignRapidItemToProduct: failed to create live_order", createOrderError);
+      return;
+    }
+    orderId = created.id;
+    await supabase.from("live_rapid_items").update({ live_order_id: orderId }).eq("id", itemId);
   }
-  if (!order) return;
 
-  const { data: orderItem } = await supabase
-    .from("live_order_items")
-    .insert({
-      live_order_id: order.id,
-      product_id: null,
-      quantity: 1,
-      unit_price_cents: product.price_cents,
-      matched: true,
-      raw_product_text: `${product.name} (${product.internal_ref})`,
-      source_comment: rapidItem.source_comment,
-    })
-    .select("id")
-    .single();
+  const { data: existingLink } = await supabase
+    .from("live_rapid_item_products")
+    .select("id, quantity, live_order_item_id")
+    .eq("live_rapid_item_id", itemId)
+    .eq("live_product_id", productId)
+    .maybeSingle();
 
-  await supabase
-    .from("live_rapid_items")
-    .update({
-      live_product_id: product.id,
-      quantity: 1,
-      live_order_id: order.id,
+  const newQuantity = (existingLink?.quantity ?? 0) + safeQuantity;
+  const discountCents = lookupDiscountCents(
+    product.discount_tiers_cents,
+    newQuantity,
+    product.simple_discount_cents
+  );
+
+  if (existingLink) {
+    if (existingLink.live_order_item_id) {
+      await supabase
+        .from("live_order_items")
+        .update({ quantity: newQuantity, discount_cents: discountCents })
+        .eq("id", existingLink.live_order_item_id);
+    }
+    await supabase
+      .from("live_rapid_item_products")
+      .update({ quantity: newQuantity, discount_cents: discountCents })
+      .eq("id", existingLink.id);
+  } else {
+    const { data: orderItem } = await supabase
+      .from("live_order_items")
+      .insert({
+        live_order_id: orderId,
+        product_id: null,
+        quantity: safeQuantity,
+        unit_price_cents: product.price_cents,
+        discount_cents: discountCents,
+        matched: true,
+        raw_product_text: `${product.name} (${product.internal_ref})`,
+        source_comment: rapidItem.source_comment,
+      })
+      .select("id")
+      .single();
+
+    await supabase.from("live_rapid_item_products").insert({
+      live_rapid_item_id: itemId,
+      live_product_id: productId,
       live_order_item_id: orderItem?.id ?? null,
-    })
-    .eq("id", itemId);
+      shop_id: shop.id,
+      quantity: safeQuantity,
+      discount_cents: discountCents,
+    });
+  }
 
   await supabase.rpc("assign_rapid_item_order_number", { p_live_id: liveId, p_item_id: itemId });
-
-  await recomputeOrderTotal(order.id);
-
+  await recomputeOrderTotal(orderId);
   revalidatePath(`/dashboard/live/${liveId}`);
 }
 
-// Retire uniquement le produit assigné à une intention (l'intention reste
-// dans la liste, redevient non-assignée) — supprime la ligne panier
-// associée sans toucher au reste. order_number n'est PAS effacé : une fois
-// attribué, il reste figé (cf. assign_rapid_item_order_number), même si
-// l'intention est ensuite ré-assignée à un autre produit.
-export async function unassignRapidItem(liveId: string, itemId: string) {
+// Retire UN produit assigné à une intention (les autres produits assignés à
+// la même intention restent intacts) — supprime la ligne de liaison et sa
+// ligne panier associée. Si c'était le DERNIER produit assigné, l'intention
+// redevient "non assignée" : order_number est réinitialisé à null (une
+// prochaine assignation en attribuera un nouveau, cf.
+// assign_rapid_item_order_number) — sinon il reste figé tant qu'au moins un
+// produit reste assigné.
+export async function unassignRapidItem(liveId: string, itemId: string, productId: string) {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
-  const { data: rapidItem } = await supabase
-    .from("live_rapid_items")
-    .select("live_order_item_id, live_order_id")
-    .eq("id", itemId)
+  const { data: link } = await supabase
+    .from("live_rapid_item_products")
+    .select("id, live_order_item_id")
+    .eq("live_rapid_item_id", itemId)
+    .eq("live_product_id", productId)
     .eq("shop_id", shop.id)
     .single();
-  if (!rapidItem) return;
+  if (!link) return;
 
-  if (rapidItem.live_order_item_id) {
-    await supabase.from("live_order_items").delete().eq("id", rapidItem.live_order_item_id);
+  if (link.live_order_item_id) {
+    await supabase.from("live_order_items").delete().eq("id", link.live_order_item_id);
   }
+  await supabase.from("live_rapid_item_products").delete().eq("id", link.id);
 
-  await supabase
+  const { data: rapidItem } = await supabase
     .from("live_rapid_items")
-    .update({
-      live_product_id: null,
-      quantity: 1,
-      live_order_id: null,
-      live_order_item_id: null,
-    })
+    .select("live_order_id")
     .eq("id", itemId)
-    .eq("shop_id", shop.id);
+    .single();
+  if (rapidItem?.live_order_id) await recomputeOrderTotal(rapidItem.live_order_id);
 
-  if (rapidItem.live_order_id) await recomputeOrderTotal(rapidItem.live_order_id);
+  const { count: remainingLinks } = await supabase
+    .from("live_rapid_item_products")
+    .select("id", { count: "exact", head: true })
+    .eq("live_rapid_item_id", itemId);
+  if (!remainingLinks) {
+    await supabase
+      .from("live_rapid_items")
+      .update({ order_number: null })
+      .eq("id", itemId)
+      .eq("shop_id", shop.id);
+  }
 
   revalidatePath(`/dashboard/live/${liveId}`);
 }
@@ -260,16 +327,25 @@ export async function deleteRapidItem(liveId: string, itemId: string) {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
+  const { data: links } = await supabase
+    .from("live_rapid_item_products")
+    .select("live_order_item_id")
+    .eq("live_rapid_item_id", itemId)
+    .eq("shop_id", shop.id);
+
+  const orderItemIds = (links ?? [])
+    .map((l) => l.live_order_item_id)
+    .filter((id): id is string => !!id);
+  if (orderItemIds.length > 0) {
+    await supabase.from("live_order_items").delete().in("id", orderItemIds);
+  }
+
   const { data: rapidItem } = await supabase
     .from("live_rapid_items")
-    .select("live_order_item_id, live_order_id")
+    .select("live_order_id")
     .eq("id", itemId)
     .eq("shop_id", shop.id)
     .single();
-
-  if (rapidItem?.live_order_item_id) {
-    await supabase.from("live_order_items").delete().eq("id", rapidItem.live_order_item_id);
-  }
 
   await supabase.from("live_rapid_items").delete().eq("id", itemId).eq("shop_id", shop.id);
 
@@ -282,11 +358,11 @@ async function recomputeOrderTotal(orderId: string) {
   const supabase = await createClient();
   const { data: items } = await supabase
     .from("live_order_items")
-    .select("quantity, unit_price_cents")
+    .select("quantity, unit_price_cents, discount_cents")
     .eq("live_order_id", orderId);
 
   const total = (items ?? []).reduce(
-    (sum, item) => sum + item.quantity * item.unit_price_cents,
+    (sum, item) => sum + item.quantity * item.unit_price_cents - (item.discount_cents ?? 0),
     0
   );
 
