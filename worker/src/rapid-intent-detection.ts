@@ -45,8 +45,18 @@ NE SONT PAS des intentions d'achat (réponds false pour ces cas) :
 - Une confirmation qu'un paiement a DÉJÀ été effectué (ex: "c'est payé",
   "payé pour ma part", "j'ai payé", "réglé") — c'est un accusé de paiement
   après coup, pas une nouvelle intention.
+- Une déclaration de possession DÉJÀ acquise, pas une nouvelle commande (ex:
+  "moi je l'ai", "je l'ai déjà", "j'en ai une") — le buyer dit qu'il possède
+  déjà l'article, il n'en redemande pas.
 - Une référence de commande, un numéro, ou un montant isolé sans verbe
   d'intention (ex: "539", "532 10€", "réf 12").
+- Une réponse/confirmation courte SANS variante ni article cité, qui répond
+  probablement à une question du vendeur ou d'un autre spectateur plutôt que
+  de nommer ce qu'on veut acheter (ex: "Oui stp", "oui", "ok", "d'accord",
+  "exact") — à distinguer de l'énumération de couleurs/variantes ci-dessus :
+  ici il n'y a AUCUN nom de couleur/variante/article, seulement un mot
+  d'acquiescement, donc pas assez pour être une intention. "stp"/"svp" seuls
+  après un "oui" ne suffisent pas à en faire une commande.
 - Une VRAIE question sur la disponibilité, l'essayage, ou une taille pour
   quelqu'un d'autre — reconnaissable à un marqueur interrogatif explicite,
   PAS au simple "stp"/"svp" final (ex: "tu peux essayer en L stp ?", "il te
