@@ -1,5 +1,4 @@
 import { supabase } from "./supabase.js";
-import { getCatalog } from "./catalog.js";
 import { parseSaleComment } from "./parsing.js";
 import { connectToLive, NOT_LIVE_CLOSE_CODE, type EulerConnection, type LiveComment } from "./euler.js";
 import { enqueueRapidComment } from "./rapid-batch-queue.js";
@@ -99,7 +98,6 @@ async function isLiveStillActive(liveId: string): Promise<boolean> {
 export async function startLiveSession(
   liveId: string,
   shopId: string,
-  mode: string,
   onEnded: (liveId: string) => void,
   onWsOpenFailure: (liveId: string, err: Error) => void
 ): Promise<LiveSession> {
@@ -163,7 +161,7 @@ export async function startLiveSession(
       onOpen: () => {
         reconnectAttempt = 0;
       },
-      onComment: (comment) => handleComment(liveId, shopId, mode, comment, saleKeywords),
+      onComment: (comment) => handleComment(liveId, shopId, comment, saleKeywords),
       onViewerCount: (viewerCount) => handleViewerCount(liveId, viewerCount),
       onLiveEnded: (reason, code) => {
         if (stopped || settled) return;
@@ -269,124 +267,18 @@ async function trackActiveCommenter(liveId: string, comment: LiveComment) {
 async function handleComment(
   liveId: string,
   shopId: string,
-  mode: string,
   comment: LiveComment,
   saleKeywords?: string[]
 ) {
   broadcastComment(liveId, comment);
   await trackActiveCommenter(liveId, comment);
 
-  if (mode === "rapid") {
-    // Pré-filtre déterministe : un commentaire contenant le mot-clé de vente
-    // du live (ex: "jp") est TOUJOURS une intention d'achat, sans dépendre
-    // du classificateur LLM (rapid-intent-detection.ts) qui peut occasionnellement
-    // rater un cas explicite. Les commentaires sans mot-clé (ex: énumération
-    // implicite de couleurs "une kaki eh une bleu jean") passent quand même
-    // par le LLM, seul moyen de les détecter.
-    const hasKeyword = parseSaleComment(comment.text, [], saleKeywords).isSale;
-    enqueueRapidComment(liveId, shopId, comment, hasKeyword);
-    return;
-  }
-
-  // Mode "freeform" : jamais d'écriture automatique en live_order_items (pour
-  // éviter les faux positifs comme "1× les deux" ajoutés au panier sans
-  // intention). Seuls les commentaires contenant le mot-clé sont persistés
-  // dans live_freeform_comments, en attente d'un ajout manuel au panier par
-  // le vendeur (bouton "Ajouter au panier" dans "Commentaires reconnus").
-  if (mode !== "catalog") {
-    const parsed = parseSaleComment(comment.text, [], saleKeywords);
-    if (!parsed.isSale) return;
-
-    const { error } = await supabase.from("live_freeform_comments").insert({
-      live_id: liveId,
-      buyer_tiktok_username: comment.username,
-      nickname: comment.nickname,
-      profile_picture_url: comment.profilePictureUrl,
-      text: comment.text,
-      tiktok_comment_id: comment.commentId,
-    });
-
-    if (error && error.code !== "23505") {
-      // 23505 = doublon idempotent (redelivery WebSocket), attendu.
-      console.error(JSON.stringify({ level: "error", liveId, error: error.message }));
-    }
-    return;
-  }
-
-  const catalog = getCatalog(shopId);
-  const parsed = parseSaleComment(comment.text, catalog, saleKeywords);
-  console.log(JSON.stringify({
-    level: "info",
-    msg: "comment parsed",
-    liveId,
-    saleKeywords,
-    rawText: comment.text,
-    isSale: parsed.isSale,
-    matched: parsed.matched,
-  }));
-  if (!parsed.isSale) return;
-
-  const buyerTiktokUsername = comment.username;
-
-  // Un panier "ouvert" par acheteur et par live (contrainte unique côté DB
-  // pending/validated agit comme filet en cas de course).
-  let { data: order } = await supabase
-    .from("live_orders")
-    .select("id")
-    .eq("live_id", liveId)
-    .eq("buyer_tiktok_username", buyerTiktokUsername)
-    .in("status", ["pending", "validated"])
-    .maybeSingle();
-
-  if (!order) {
-    const { data: created } = await supabase
-      .from("live_orders")
-      .insert({ live_id: liveId, shop_id: shopId, buyer_tiktok_username: buyerTiktokUsername })
-      .select("id")
-      .single();
-    order = created;
-  }
-  if (!order) return;
-
-  const unitPriceCents = parsed.product?.priceCents ?? 0;
-
-  // Idempotence : l'index unique (live_order_id, tiktok_comment_id) empêche
-  // le doublon si le WebSocket redélivre le même commentaire après reconnexion.
-  const { error } = await supabase.from("live_order_items").insert({
-    live_order_id: order.id,
-    product_id: parsed.product?.id ?? null,
-    variant_id: parsed.variant?.id ?? null,
-    size_label: parsed.variant?.label ?? null,
-    quantity: parsed.quantity,
-    unit_price_cents: unitPriceCents,
-    tiktok_comment_id: comment.commentId,
-    source_comment: comment.text,
-    raw_product_text: parsed.rawProductText ?? null,
-    raw_size_text: parsed.rawSizeText ?? null,
-    matched: parsed.matched,
-    match_score: parsed.matchScore ?? null,
-  });
-
-  if (error && error.code !== "23505") {
-    // 23505 = doublon idempotent, attendu en cas de redelivery ; toute autre
-    // erreur mérite d'être visible dans les logs du worker.
-    console.error(JSON.stringify({ level: "error", liveId, error: error.message }));
-    return;
-  }
-
-  await recomputeOrderTotal(order.id);
-}
-
-async function recomputeOrderTotal(orderId: string) {
-  const { data: items } = await supabase
-    .from("live_order_items")
-    .select("quantity, unit_price_cents")
-    .eq("live_order_id", orderId);
-
-  const total = (items ?? []).reduce(
-    (sum, item) => sum + item.quantity * item.unit_price_cents,
-    0
-  );
-
-  await supabase.from("live_orders").update({ total_cents: total }).eq("id", orderId);
+  // Pré-filtre déterministe : un commentaire contenant le mot-clé de vente
+  // du live (ex: "jp") est TOUJOURS une intention d'achat, sans dépendre
+  // du classificateur LLM (rapid-intent-detection.ts) qui peut occasionnellement
+  // rater un cas explicite. Les commentaires sans mot-clé (ex: énumération
+  // implicite de couleurs "une kaki eh une bleu jean") passent quand même
+  // par le LLM, seul moyen de les détecter.
+  const hasKeyword = parseSaleComment(comment.text, [], saleKeywords).isSale;
+  enqueueRapidComment(liveId, shopId, comment, hasKeyword);
 }
