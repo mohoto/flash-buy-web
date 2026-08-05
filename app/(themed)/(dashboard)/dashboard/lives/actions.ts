@@ -51,22 +51,39 @@ export async function getLastLiveDefaults(): Promise<{
   };
 }
 
-// Crée le live et le démarre en un seul submit (formulaire /dashboard/lives/new)
-// : pseudo TikTok, étiquette de départ et mots-clés de vente sont déjà
-// définitifs au moment où le worker le réclame (status = 'live' d'emblée,
-// cf. worker/src/sharding.ts claimNextLive) — plus d'étape "scheduled"
+// Crée le live et le démarre (formulaire /dashboard/lives/new) : pseudo
+// TikTok, étiquette de départ et mots-clés de vente sont déjà définitifs au
+// moment où le worker le réclame (status = 'live' d'emblée, cf.
+// worker/src/sharding.ts claimNextLive) — plus d'étape "scheduled"
 // intermédiaire à configurer depuis la console live.
+//
+// Ne redirige jamais elle-même : le formulaire (NewLiveForm) attend d'abord
+// que lives.euler_status passe à 'connected' avant de naviguer vers la
+// console — cf. commentaire sur NewLiveForm pour le pourquoi (le worker peut
+// heartbeat/claim le live tout en échouant en boucle à joindre Euler, ex.
+// pseudo TikTok invalide).
+//
+// Toujours un nouveau live, jamais de réutilisation d'un live précédent : un
+// live déjà claim par un worker (worker_id posé) ne peut pas être "repris"
+// depuis le web sans risquer une session Euler zombie en parallèle — le
+// worker ne relit tiktok_username qu'une fois, au démarrage de sa session
+// (cf. worker/src/live-session.ts startLiveSession), donc changer le pseudo
+// en base sous un live déjà claim ne serait même pas pris en compte tant que
+// ce worker ne relâche pas la main. cf. abandonFailedLive pour ce qui arrive
+// à un live dont la connexion échoue.
 //
 // Mode rapid : rapid_intent_seq est incrémenté par assign_rapid_item_order_number
 // AVANT d'être lu, donc la prochaine étiquette attribuée est toujours seq+1 —
 // pour que ce soit le nombre choisi par le vendeur, on stocke (choix - 1).
-export async function createAndStartLive(formData: FormData) {
+export async function createAndStartLive(
+  formData: FormData
+): Promise<{ liveId: string } | { error: string }> {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
-  const existingId = await findActiveLiveId();
-  if (existingId) {
-    redirect(`/dashboard/live/${existingId}`);
+  const otherActiveId = await findActiveLiveId();
+  if (otherActiveId) {
+    redirect(`/dashboard/live/${otherActiveId}`);
   }
 
   // name="tiktok_handle" (pas "tiktok_username") pour éviter que les
@@ -92,11 +109,36 @@ export async function createAndStartLive(formData: FormData) {
     .single();
 
   if (error || !data) {
-    redirect("/dashboard/lives/new?error=start_failed");
+    return { error: "La création du live a échoué, réessaie." };
   }
 
   revalidatePath("/dashboard/lives");
-  redirect(`/dashboard/live/${data.id}`);
+  return { liveId: data.id };
+}
+
+// Appelée par NewLiveForm dès que la connexion Euler d'un live fraîchement
+// créé échoue (ou n'aboutit jamais dans le délai imparti) — marque le live
+// "ended" plutôt que de le supprimer tout de suite : c'est le seul signal que
+// le worker surveille déjà (cf. son heartbeat, worker/src/index.ts
+// startHeartbeatLoop, qui compare le status à chaque battement et s'arrête
+// dès qu'il n'est plus "live") pour arrêter proprement sa session Euler en
+// cours, dans un délai de quelques secondes à HEARTBEAT_INTERVAL_MS (15s par
+// défaut). Ne bloque jamais le vendeur : le formulaire redevient utilisable
+// immédiatement après cet appel, sans attendre que le worker ait confirmé
+// avoir relâché le live — un live "ended" sans la moindre commande ni
+// commentaire n'encombre pas l'historique de façon gênante.
+export async function abandonFailedLive(liveId: string) {
+  const shop = await getOwnShop();
+  const supabase = await createClient();
+
+  await supabase
+    .from("lives")
+    .update({ status: "ended", ended_at: new Date().toISOString() })
+    .eq("id", liveId)
+    .eq("shop_id", shop.id)
+    .eq("status", "live");
+
+  revalidatePath("/dashboard/lives");
 }
 
 // Bouton "Terminer le live" (live en cours, status="live") ET "Annuler"
