@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { saveConnectionAndStart } from "./actions";
 import { Radio, TriangleAlert } from "lucide-react";
@@ -29,7 +29,18 @@ function isWorkerActive(workerId: string | null, heartbeatAt: string | null): bo
   );
 }
 
-// Combine deux signaux distincts en un seul état : le heartbeat worker
+const ConnectionStatusContext = createContext<(ConnectionRow & { workerActive: boolean }) | null>(
+  null
+);
+
+// Un seul abonnement Realtime par live, partagé par ConnectionStatusBadge et
+// EulerFailureAlert via le contexte ci-dessous — Supabase réutilise le canal
+// déjà créé pour un même nom (`live-connection-${liveId}`), donc deux hooks
+// indépendants appelant chacun .channel(...).on(...).subscribe() sur ce même
+// nom levaient "cannot add postgres_changes callbacks ... after subscribe()"
+// dès que badge et alerte étaient montés en même temps (cf. page.tsx).
+//
+// Combine aussi deux signaux distincts en un seul état : le heartbeat worker
 // (lives.worker_id/heartbeat_at, "le process a bien ce live en charge") et
 // euler_status (lives.euler_status, "la websocket TikTok fonctionne
 // réellement"). Un worker peut heartbeat normalement tout en échouant en
@@ -37,11 +48,27 @@ function isWorkerActive(workerId: string | null, heartbeatAt: string | null): bo
 // badge "Worker connecté" restait vert dans ce cas, alors qu'aucun
 // commentaire n'arrivait jamais. cf. worker/src/live-session.ts
 // (markEulerConnected/markEulerFailing).
-function useConnectionStatus(
-  liveId: string,
-  initial: ConnectionRow
-) {
-  const [state, setState] = useState(initial);
+export function ConnectionStatusProvider({
+  liveId,
+  workerId,
+  heartbeatAt,
+  eulerStatus,
+  eulerLastError,
+  children,
+}: {
+  liveId: string;
+  workerId: string | null;
+  heartbeatAt: string | null;
+  eulerStatus: EulerStatus;
+  eulerLastError: string | null;
+  children: React.ReactNode;
+}) {
+  const [state, setState] = useState<ConnectionRow>({
+    workerId,
+    heartbeatAt,
+    eulerStatus,
+    eulerLastError,
+  });
 
   // Sans cet abonnement, l'état reste figé sur ce qui a été lu au chargement
   // de la page tant qu'aucune Server Action ne redéclenche un rendu.
@@ -114,33 +141,29 @@ function useConnectionStatus(
 
   const workerActive = isWorkerActive(state.workerId, state.heartbeatAt);
 
-  return { ...state, workerActive };
+  return (
+    <ConnectionStatusContext.Provider value={{ ...state, workerActive }}>
+      {children}
+    </ConnectionStatusContext.Provider>
+  );
+}
+
+function useConnectionStatus() {
+  const value = useContext(ConnectionStatusContext);
+  if (!value) {
+    throw new Error("useConnectionStatus must be used within a ConnectionStatusProvider");
+  }
+  return value;
 }
 
 // Badge compact destiné à l'en-tête de la page une fois le live connecté :
 // évite de garder un encart entier juste pour un statut, une fois qu'il n'y a
 // plus de formulaire à afficher. Un seul badge, un seul état vrai à la fois :
 // pas de worker -> pas de connexion Euler possible -> pas de commentaire, la
-// cause la plus en amont prime toujours sur les suivantes.
-export function ConnectionStatusBadge({
-  liveId,
-  workerId,
-  heartbeatAt,
-  eulerStatus,
-  eulerLastError,
-}: {
-  liveId: string;
-  workerId: string | null;
-  heartbeatAt: string | null;
-  eulerStatus: EulerStatus;
-  eulerLastError: string | null;
-}) {
-  const status = useConnectionStatus(liveId, {
-    workerId,
-    heartbeatAt,
-    eulerStatus,
-    eulerLastError,
-  });
+// cause la plus en amont prime toujours sur les suivantes. Doit être monté
+// sous ConnectionStatusProvider (cf. page.tsx).
+export function ConnectionStatusBadge() {
+  const status = useConnectionStatus();
 
   if (!status.workerActive) {
     return <StatusBadge variant="warning">Aucun worker connecté</StatusBadge>;
@@ -164,26 +187,10 @@ export function ConnectionStatusBadge({
 // s'affiche plutôt que de découvrir un live silencieux après coup. cf. bug du
 // 2026-08-05 : un pseudo TikTok mal saisi (URL collée avec un "/" de fin)
 // faisait échouer Euler en boucle (close_4400/INVALID_OPTIONS) sans aucun
-// signal visible côté dashboard.
-export function EulerFailureAlert({
-  liveId,
-  workerId,
-  heartbeatAt,
-  eulerStatus,
-  eulerLastError,
-}: {
-  liveId: string;
-  workerId: string | null;
-  heartbeatAt: string | null;
-  eulerStatus: EulerStatus;
-  eulerLastError: string | null;
-}) {
-  const status = useConnectionStatus(liveId, {
-    workerId,
-    heartbeatAt,
-    eulerStatus,
-    eulerLastError,
-  });
+// signal visible côté dashboard. Doit être monté sous
+// ConnectionStatusProvider (cf. page.tsx).
+export function EulerFailureAlert() {
+  const status = useConnectionStatus();
 
   if (status.eulerStatus !== "failing") return null;
 

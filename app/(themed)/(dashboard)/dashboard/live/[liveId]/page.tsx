@@ -3,7 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { getOwnShop } from "@/lib/dashboard/get-own-shop";
 import { RapidConsoleClient } from "./rapid-console-client";
 import { LiveBadge } from "./live-badge";
-import { ConnectionStatusBadge, EulerFailureAlert, LiveConnectionForm } from "./live-connection-settings";
+import {
+  ConnectionStatusProvider,
+  ConnectionStatusBadge,
+  EulerFailureAlert,
+  LiveConnectionForm,
+} from "./live-connection-settings";
 import { LiveViewersPanel } from "./live-viewers-panel";
 import { endLive } from "../../lives/actions";
 import { Button } from "@/components/ui/button";
@@ -89,121 +94,135 @@ export default async function LiveConsolePage({
     .reduce((sum, o) => sum + o.total_cents, 0);
 
   const isScheduled = live.status === "scheduled";
+  const eulerStatus = live.euler_status as "connecting" | "connected" | "failing";
 
-  return (
-    <div className="flex flex-col gap-6 pb-12">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <LiveBadge liveId={liveId} initialStatus={live.status} />
-          {!isScheduled && (
-            <ConnectionStatusBadge
-              liveId={liveId}
-              workerId={live.worker_id}
-              heartbeatAt={live.heartbeat_at}
-              eulerStatus={live.euler_status as "connecting" | "connected" | "failing"}
-              eulerLastError={live.euler_last_error}
-            />
-          )}
-        </div>
-        {(live.status === "live" || isScheduled) && (
-          <form action={endLive.bind(null, liveId)}>
-            <Button type="submit" className="rounded-full">
-              {live.status === "live" ? (
-                <>
-                  <Unplug />
-                  Terminer le live
-                </>
-              ) : (
-                <>
-                  <CircleX />
-                  Annuler
-                </>
-              )}
-            </Button>
-          </form>
-        )}
+  // Un seul provider pour toute la page (en-tête + contenu) : le badge dans
+  // l'en-tête et l'alerte plus bas doivent partager la même souscription
+  // Realtime, pas en créer chacun une (cf. commentaire sur
+  // ConnectionStatusProvider — deux canaux de même nom montés en même temps
+  // faisaient planter Supabase Realtime).
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <LiveBadge liveId={liveId} initialStatus={live.status} />
+        {!isScheduled && <ConnectionStatusBadge />}
+      </div>
+      {(live.status === "live" || isScheduled) && (
+        <form action={endLive.bind(null, liveId)}>
+          <Button type="submit" className="rounded-full">
+            {live.status === "live" ? (
+              <>
+                <Unplug />
+                Terminer le live
+              </>
+            ) : (
+              <>
+                <CircleX />
+                Annuler
+              </>
+            )}
+          </Button>
+        </form>
+      )}
+    </div>
+  );
+
+  const body = isScheduled ? (
+    <Card className="mx-auto w-full max-w-lg">
+      <CardHeader>
+        <CardTitle>Connexion TikTok LIVE</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <LiveConnectionForm
+          liveId={liveId}
+          tiktokUsername={live.tiktok_username}
+          saleKeywords={shop.sale_keywords}
+          rapidIntentSeq={live.rapid_intent_seq}
+        />
+      </CardContent>
+    </Card>
+  ) : (
+    <>
+      <EulerFailureAlert />
+
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Card>
+          <CardContent className="py-4">
+            <Stat label="Commandes totales" value={String(totalOrdersCount)} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <Stat label="Commandes en attente" value={String(pendingCount)} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <Stat label="Commandes payées" value={String(paidCount)} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <Stat label="Chiffre d'affaire" value={`${(revenueCents / 100).toFixed(2)} €`} />
+          </CardContent>
+        </Card>
       </div>
 
-      {isScheduled ? (
-        <Card className="mx-auto w-full max-w-lg">
-          <CardHeader>
-            <CardTitle>Connexion TikTok LIVE</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <LiveConnectionForm
+      <div className="grid grid-cols-1 gap-6">
+        <RapidConsoleClient
+          liveId={liveId}
+          initialProducts={rapidProducts ?? []}
+          initialItems={rapidItems ?? []}
+          initialItemProducts={rapidItemProducts ?? []}
+          initialOrders={orders ?? []}
+          initialOrderItemDates={rapidOrderItemDates ?? []}
+          preparedProducts={preparedProducts ?? []}
+          previousLives={previousLives ?? []}
+          shopSettings={{
+            pendingOrderExpiryMinutes: shop.pending_order_expiry_minutes,
+            unpaidOrderRestriction: shop.unpaid_order_restriction,
+            unpaidOrderCeilingCents: shop.unpaid_order_ceiling_cents,
+          }}
+        />
+
+        {/* Masqué pour le moment, ne pas supprimer :
+        <Card className="h-160 overflow-hidden">
+          <CardContent className="flex h-full min-h-0 flex-col">
+            <LiveViewersPanel
               liveId={liveId}
-              tiktokUsername={live.tiktok_username}
-              saleKeywords={shop.sale_keywords}
-              rapidIntentSeq={live.rapid_intent_seq}
+              initialCommenters={commenters ?? []}
+              initialViewerCount={live.viewer_count}
+              initialWorkerId={live.worker_id}
+              initialHeartbeatAt={live.heartbeat_at}
             />
           </CardContent>
         </Card>
-      ) : (
-        <>
-          <EulerFailureAlert
-            liveId={liveId}
-            workerId={live.worker_id}
-            heartbeatAt={live.heartbeat_at}
-            eulerStatus={live.euler_status as "connecting" | "connected" | "failing"}
-            eulerLastError={live.euler_last_error}
-          />
+        */}
+      </div>
+    </>
+  );
 
-          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Card>
-              <CardContent className="py-4">
-                <Stat label="Commandes totales" value={String(totalOrdersCount)} />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="py-4">
-                <Stat label="Commandes en attente" value={String(pendingCount)} />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="py-4">
-                <Stat label="Commandes payées" value={String(paidCount)} />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="py-4">
-                <Stat label="Chiffre d'affaire" value={`${(revenueCents / 100).toFixed(2)} €`} />
-              </CardContent>
-            </Card>
-          </div>
+  if (isScheduled) {
+    return (
+      <div className="flex flex-col gap-6 pb-12">
+        {header}
+        {body}
+      </div>
+    );
+  }
 
-          <div className="grid grid-cols-1 gap-6">
-            <RapidConsoleClient
-              liveId={liveId}
-              initialProducts={rapidProducts ?? []}
-              initialItems={rapidItems ?? []}
-              initialItemProducts={rapidItemProducts ?? []}
-              initialOrders={orders ?? []}
-              initialOrderItemDates={rapidOrderItemDates ?? []}
-              preparedProducts={preparedProducts ?? []}
-              previousLives={previousLives ?? []}
-              shopSettings={{
-                pendingOrderExpiryMinutes: shop.pending_order_expiry_minutes,
-                unpaidOrderRestriction: shop.unpaid_order_restriction,
-                unpaidOrderCeilingCents: shop.unpaid_order_ceiling_cents,
-              }}
-            />
-
-            {/* Masqué pour le moment, ne pas supprimer :
-            <Card className="h-160 overflow-hidden">
-              <CardContent className="flex h-full min-h-0 flex-col">
-                <LiveViewersPanel
-                  liveId={liveId}
-                  initialCommenters={commenters ?? []}
-                  initialViewerCount={live.viewer_count}
-                  initialWorkerId={live.worker_id}
-                  initialHeartbeatAt={live.heartbeat_at}
-                />
-              </CardContent>
-            </Card>
-            */}
-          </div>
-        </>
-      )}
+  return (
+    <div className="flex flex-col gap-6 pb-12">
+      <ConnectionStatusProvider
+        liveId={liveId}
+        workerId={live.worker_id}
+        heartbeatAt={live.heartbeat_at}
+        eulerStatus={eulerStatus}
+        eulerLastError={live.euler_last_error}
+      >
+        {header}
+        {body}
+      </ConnectionStatusProvider>
     </div>
   );
 }
