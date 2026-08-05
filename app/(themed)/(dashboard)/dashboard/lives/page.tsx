@@ -2,7 +2,6 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { getOwnShop } from "@/lib/dashboard/get-own-shop";
 import { Button } from "@/components/ui/button";
-import { startLive } from "./actions";
 import { LivesList } from "./lives-list";
 
 export default async function LivesPage() {
@@ -27,9 +26,7 @@ export default async function LivesPage() {
             {activeLive.status === "live" ? "Rejoindre le live en cours" : "Reprendre le live programmé"}
           </Button>
         ) : (
-          <form action={startLive}>
-            <Button type="submit">Démarrer un live</Button>
-          </form>
+          <Button render={<Link href="/dashboard/lives/new" />}>Démarrer un live</Button>
         )}
       </div>
 

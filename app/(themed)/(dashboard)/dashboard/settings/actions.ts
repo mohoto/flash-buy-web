@@ -39,9 +39,9 @@ export async function updateLiveSettings(formData: FormData) {
 }
 
 // Mots-clés de vente réglés une seule fois par boutique (au lieu de
-// lives.sale_keywords, saisi live par live) — saveConnectionAndStart
-// (app/(dashboard)/dashboard/live/[liveId]/actions.ts) copie shop.sale_keywords
-// dans lives.sale_keywords à la connexion, seule valeur relue par le worker.
+// lives.sale_keywords, saisi live par live) — createAndStartLive
+// (app/(dashboard)/dashboard/lives/actions.ts) copie shop.sale_keywords dans
+// lives.sale_keywords à la création du live, seule valeur relue par le worker.
 export async function updateSaleKeywords(formData: FormData) {
   const shop = await getOwnShop();
   const supabase = await createClient();

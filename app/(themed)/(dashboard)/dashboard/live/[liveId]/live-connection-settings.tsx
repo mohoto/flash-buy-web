@@ -2,13 +2,8 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { saveConnectionAndStart } from "./actions";
-import { Radio, TriangleAlert } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { TriangleAlert } from "lucide-react";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
-import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
 import { StatusBadge } from "./status-badge";
 
 const WORKER_STALE_MS = 60_000;
@@ -218,91 +213,7 @@ export function EulerFailureAlert() {
   );
 }
 
-// Formulaire de mise en route, affiché tant que le live n'a pas démarré
-// (status = "scheduled") : pseudo et mots-clés se règlent en un seul submit
-// qui lance aussi la connexion — le worker ne réclame le live qu'à partir de
-// status = "live" (cf. worker/src/sharding.ts claimNextLive), donc rien ne
-// se connecte à Euler avant ce clic. Le mode est toujours "rapid" (fixé
-// côté serveur dans saveConnectionAndStart), plus de choix ici.
-export function LiveConnectionForm({
-  liveId,
-  tiktokUsername,
-  saleKeywords,
-  rapidIntentSeq,
-}: {
-  liveId: string;
-  tiktokUsername: string | null;
-  saleKeywords: string[];
-  rapidIntentSeq: number;
-}) {
-  return (
-    <form action={saveConnectionAndStart.bind(null, liveId)} className="flex flex-col gap-5">
-      <Field>
-        <FieldLabel htmlFor="tiktok_handle">Pseudo TikTok pour ce live</FieldLabel>
-        <Input
-          id="tiktok_handle"
-          name="tiktok_handle"
-          defaultValue={tiktokUsername ?? ""}
-          placeholder="@monshop"
-          size="lg"
-          autoComplete="off"
-          data-1p-ignore
-          data-lpignore="true"
-          className="**:data-[slot=input]:h-11 **:data-[slot=input]:text-base **:data-[slot=input]:leading-11"
-        />
-        <FieldDescription>
-          Peut changer à chaque live (ex. compte différent, invité…).
-        </FieldDescription>
-      </Field>
-
-      <Field>
-        <FieldLabel htmlFor="start_number">Prochaine étiquette</FieldLabel>
-        <Input
-          id="start_number"
-          name="start_number"
-          type="number"
-          min={1}
-          step="1"
-          defaultValue={rapidIntentSeq + 1}
-          nativeInput
-        />
-        <FieldDescription>
-          Par défaut, la numérotation des étiquettes démarre à 100.
-        </FieldDescription>
-      </Field>
-
-      <Field>
-        <FieldLabel>Mots-clés de vente</FieldLabel>
-        {saleKeywords.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {saleKeywords.map((keyword) => (
-              <Badge
-                key={keyword}
-                variant="secondary"
-                size="lg"
-                className="min-w-16 justify-center text-xl sm:min-w-16"
-              >
-                {keyword}
-              </Badge>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">Aucun mot-clé réglé.</p>
-        )}
-        <FieldDescription>
-          Réglables dans Réglages → Mots-clés de vente, valables pour tous les lives de la
-          boutique.
-        </FieldDescription>
-      </Field>
-
-      <Button
-        type="submit"
-        size="xl"
-        className="h-12 rounded-full"
-      >
-        <Radio />
-        Connexion au live
-      </Button>
-    </form>
-  );
-}
+// Le formulaire de mise en route (pseudo TikTok, étiquette de départ,
+// mots-clés) vit désormais sur /dashboard/lives/new (cf. NewLiveForm), qui
+// crée le live déjà en status="live" — il n'y a plus d'étape "scheduled" à
+// configurer depuis cette page.
