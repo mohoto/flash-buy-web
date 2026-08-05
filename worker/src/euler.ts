@@ -1,11 +1,30 @@
 import WebSocket from "ws";
 import {
   createWebSocketUrl,
+  normalizeUniqueId,
   ClientCloseCode,
+  CloseMessageMap,
   type WebcastChatMessage,
   type WebcastRoomUserSeqMessage,
 } from "@eulerstream/euler-websocket-sdk";
 import { config } from "./config.js";
+
+// normalizeUniqueId() (SDK) gère déjà @pseudo et les URLs TikTok complètes,
+// mais laisse passer un "/" de fin isolé (ex. pseudo collé depuis
+// tiktok.com/@pseudo/live sans le reste de l'URL) — confirmé en pratique :
+// un tel pseudo produit un close_4400 (INVALID_OPTIONS) en boucle côté Euler,
+// jamais résolu par un retry. cf. lives.tiktok_username, saisi librement par
+// le vendeur dans LiveConnectionForm (live-connection-settings.tsx).
+export function normalizeTiktokUsername(raw: string): string {
+  return normalizeUniqueId(raw.trim()).replace(/\/+$/, "");
+}
+
+// Message lisible pour un close code Euler, affiché au vendeur (cf.
+// live-session.ts markEulerFailing) — CloseMessageMap vient du SDK, jamais
+// dupliqué ici pour rester à jour avec les codes qu'Euler peut renvoyer.
+export function describeCloseCode(code: number): string {
+  return CloseMessageMap[code as keyof typeof CloseMessageMap] ?? `Code ${code}`;
+}
 
 export type LiveComment = {
   commentId: string;
@@ -59,6 +78,15 @@ export function connectToLive(
   tiktokUsername: string,
   handlers: {
     onOpen?: () => void;
+    // Toute frame Euler valide reçue (quel que soit son type) — signal fiable
+    // que la session est réellement établie, contrairement à onOpen qui se
+    // déclenche à l'ouverture TCP/WS, avant qu'Euler ait validé uniqueId
+    // (confirmé en pratique : "euler websocket opened" suivi immédiatement
+    // d'un close_4400 sur la même connexion). Ne pas confondre avec
+    // onComment/onViewerCount, qui ne couvrent qu'un sous-ensemble des types
+    // de frame et pourraient ne jamais se déclencher sur un live sans
+    // interaction.
+    onFrameReceived?: () => void;
     onComment: (comment: LiveComment) => void;
     onViewerCount: (viewerCount: number) => void;
     // Le streamer a réellement arrêté le live (ou n'était déjà plus en
@@ -99,6 +127,8 @@ export function connectToLive(
         rawSample: envelopes.length === 0 ? raw.toString().slice(0, 500) : undefined,
       })
     );
+
+    handlers.onFrameReceived?.();
 
     for (const envelope of envelopes) {
       if (envelope.type === "WebcastChatMessage") {

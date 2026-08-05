@@ -1,6 +1,13 @@
 import { supabase } from "./supabase.js";
 import { parseSaleComment } from "./parsing.js";
-import { connectToLive, NOT_LIVE_CLOSE_CODE, type EulerConnection, type LiveComment } from "./euler.js";
+import {
+  connectToLive,
+  normalizeTiktokUsername,
+  describeCloseCode,
+  NOT_LIVE_CLOSE_CODE,
+  type EulerConnection,
+  type LiveComment,
+} from "./euler.js";
 import { enqueueRapidComment } from "./rapid-batch-queue.js";
 
 export type LiveSession = {
@@ -20,6 +27,33 @@ const RECONNECT_MAX_DELAY_MS = 30_000;
 
 function reconnectDelayMs(attempt: number): number {
   return Math.min(RECONNECT_BASE_DELAY_MS * 2 ** attempt, RECONNECT_MAX_DELAY_MS);
+}
+
+// Seuil déclenchant lives.euler_status = 'failing' : une coupure isolée vite
+// rétablie (réseau, erreur serveur transitoire) ne doit jamais alerter le
+// vendeur — seule une panne qui persiste (ex. pseudo TikTok invalide,
+// close_4400/INVALID_OPTIONS, jamais résolu par un retry) le justifie. cf.
+// bug observé le 2026-08-05 : un live est resté indéfiniment sans
+// commentaires, "Worker connecté" restant vert car le process avait bien
+// heartbeat malgré des centaines d'échecs de connexion Euler consécutifs.
+const EULER_FAILING_THRESHOLD = 3;
+const EULER_FAILING_WINDOW_MS = 15_000;
+
+// Code de fermeture Euler signifiant une erreur de configuration (pseudo/clé
+// invalide) plutôt qu'un incident réseau transitoire — jamais résolu par un
+// simple retry, donc reconnu immédiatement dans le message affiché au
+// vendeur (cf. buildEulerErrorMessage) sans attendre le seuil de répétition.
+const CONFIG_ERROR_CLOSE_CODES = [4400, 4401, 4403, 4404];
+
+function extractCloseCode(reason: string): number | null {
+  const match = /^close_(\d+)$/.exec(reason);
+  return match ? Number(match[1]) : null;
+}
+
+function buildEulerErrorMessage(reason: string): string {
+  const code = extractCloseCode(reason);
+  if (code === null) return reason;
+  return `${describeCloseCode(code)} (code ${code})`;
 }
 
 // Un NOT_LIVE reçu dans les tout premiers instants d'une session peut être
@@ -86,6 +120,36 @@ function closeCommentChannel(liveId: string) {
   commentChannels.delete(liveId);
 }
 
+// État de connexion Euler affiché au vendeur (cf. ConnectionStatusBadge côté
+// web) — distinct du heartbeat worker (lives.worker_id/heartbeat_at), qui ne
+// prouve que "le process a bien ce live en charge", pas que la websocket
+// TikTok fonctionne. Sans ça, un pseudo TikTok invalide pouvait boucler en
+// close_4400 indéfiniment sans jamais rien signaler côté dashboard.
+async function markEulerConnected(liveId: string) {
+  await supabase
+    .from("lives")
+    .update({ euler_status: "connected", euler_last_error: null, euler_failing_since: null })
+    .eq("id", liveId)
+    .neq("euler_status", "connected"); // évite une écriture à chaque frame reçue
+}
+
+async function markEulerFailing(liveId: string, message: string) {
+  const { data } = await supabase
+    .from("lives")
+    .select("euler_failing_since")
+    .eq("id", liveId)
+    .single();
+
+  await supabase
+    .from("lives")
+    .update({
+      euler_status: "failing",
+      euler_last_error: message,
+      euler_failing_since: data?.euler_failing_since ?? new Date().toISOString(),
+    })
+    .eq("id", liveId);
+}
+
 // Le live a-t-il été refermé par un autre chemin pendant qu'on retentait la
 // connexion (ex. le vendeur clique "Terminer le live" manuellement) ? Vérifié
 // avant chaque tentative de reconnexion pour ne jamais reconnecter un live
@@ -110,17 +174,34 @@ export async function startLiveSession(
     .eq("id", liveId)
     .single();
 
-  const tiktokUsername = liveRow?.tiktok_username;
-  if (!tiktokUsername) {
+  const rawTiktokUsername = liveRow?.tiktok_username;
+  if (!rawTiktokUsername) {
     throw new Error(`Live ${liveId} has no tiktok_username configured`);
   }
+  // Nettoie un pseudo collé avec un "@", une URL TikTok complète, ou un "/"
+  // de fin (ex. "tiktok.com/@pseudo/live" tronqué) — sans ça, Euler renvoie
+  // close_4400 (INVALID_OPTIONS) en boucle, jamais résolu par un retry.
+  const tiktokUsername = normalizeTiktokUsername(rawTiktokUsername);
   const saleKeywords = liveRow?.sale_keywords;
+
+  // Repart toujours de 'connecting' au démarrage d'une session : un live
+  // relancé (nouveau claim après un ended/released) ne doit pas hériter d'un
+  // euler_status périmé (ex. 'failing' d'une session précédente terminée
+  // depuis).
+  await supabase
+    .from("lives")
+    .update({ euler_status: "connecting", euler_last_error: null, euler_failing_since: null })
+    .eq("id", liveId);
 
   let reconnectAttempt = 0;
   let stopped = false;
   let currentConnection: EulerConnection | null = null;
   const sessionStartedAt = Date.now();
   let earlyNotLiveRetries = 0;
+  // Horodatages des échecs récents (fenêtre glissante) — sert uniquement à
+  // décider quand écrire euler_status = 'failing' (cf. EULER_FAILING_THRESHOLD),
+  // jamais persisté tel quel.
+  const recentFailureTimestamps: number[] = [];
 
   const session: LiveSession = {
     liveId,
@@ -157,9 +238,26 @@ export async function startLiveSession(
     // websockets concurrents pour le même live.
     let settled = false;
 
+    // Marqué au premier onOpen "franc" (voir plus bas) plutôt qu'à chaque
+    // frame — une seule écriture DB par connexion réussie, pas une par
+    // message reçu.
+    let connectedMarked = false;
+
     currentConnection = connectToLive(tiktokUsername, {
       onOpen: () => {
         reconnectAttempt = 0;
+      },
+      // onOpen (ouverture TCP/WS) n'est pas fiable : Euler peut fermer juste
+      // après avec close_4400 pour un uniqueId invalide. La première frame
+      // effectivement reçue est le seul signal fiable que la session est
+      // réellement établie — cf. commentaire sur onFrameReceived (euler.ts).
+      onFrameReceived: () => {
+        if (connectedMarked) return;
+        connectedMarked = true;
+        recentFailureTimestamps.length = 0;
+        markEulerConnected(liveId).catch((err) =>
+          console.error(JSON.stringify({ level: "error", msg: "failed to mark euler connected", liveId, error: (err as Error).message }))
+        );
       },
       onComment: (comment) => handleComment(liveId, shopId, comment, saleKeywords),
       onViewerCount: (viewerCount) => handleViewerCount(liveId, viewerCount),
@@ -195,6 +293,26 @@ export async function startLiveSession(
         settled = true;
         session.wsOpenFailures += 1;
         onWsOpenFailure(liveId, new Error(reason));
+
+        // Fenêtre glissante d'échecs récents : une coupure isolée vite
+        // rétablie ne doit jamais alerter, seule une panne qui persiste sur
+        // EULER_FAILING_THRESHOLD tentatives consécutives dans la fenêtre le
+        // justifie (cf. constantes en tête de fichier).
+        const now = Date.now();
+        recentFailureTimestamps.push(now);
+        while (
+          recentFailureTimestamps.length > 0 &&
+          now - recentFailureTimestamps[0] > EULER_FAILING_WINDOW_MS
+        ) {
+          recentFailureTimestamps.shift();
+        }
+
+        const isConfigError = CONFIG_ERROR_CLOSE_CODES.some((code) => reason === `close_${code}`);
+        if (isConfigError || recentFailureTimestamps.length >= EULER_FAILING_THRESHOLD) {
+          markEulerFailing(liveId, buildEulerErrorMessage(reason)).catch((err) =>
+            console.error(JSON.stringify({ level: "error", msg: "failed to mark euler failing", liveId, error: (err as Error).message }))
+          );
+        }
 
         if (!(await isLiveStillActive(liveId))) {
           // Terminé entre-temps par un autre chemin (ex. le vendeur a cliqué

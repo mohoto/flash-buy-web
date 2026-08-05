@@ -26,13 +26,44 @@
       "Bash(mkdir -p \"/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/live/[cartSlug]\")",
       "Bash(curl -s http://localhost:3000/live/destok-test)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/live/inexistant-slug-xyz)",
-      "Bash(curl -s -c /tmp/buyer_cookies.txt -i -X POST http://localhost:3000/live/destok-test -H \"Content-Type: application/x-www-form-urlencoded\" --data \"username=test_buyer_123\" -L -o /tmp/buyer_response.html -w \"%{http_code}\\\\n\")"
+      "Bash(curl -s -c /tmp/buyer_cookies.txt -i -X POST http://localhost:3000/live/destok-test -H \"Content-Type: application/x-www-form-urlencoded\" --data \"username=test_buyer_123\" -L -o /tmp/buyer_response.html -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s \"https://magicui.design/registry.json\" -o /tmp/registry.json -w \"%{http_code}\\\\n\")",
+      "Bash(node -e ' *)",
+      "Bash(rm \"/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/\\(dashboard\\)/dashboard/live/[liveId]/tiktok-panel.tsx\")",
+      "Bash(git restore *)",
+      "Bash(rm /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/live/\\\\[cartSlug\\\\]/actions.ts)",
+      "Bash(grep -n \"ScrollArea className\\\\|return \\(\\\\s*$\" /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/\\\\\\(dashboard\\\\\\)/dashboard/live/\\\\[liveId\\\\]/live-comments-feed.tsx /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/\\\\\\(dashboard\\\\\\)/dashboard/live/\\\\[liveId\\\\]/live-console-client.tsx)",
+      "Bash(git -C /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web log --oneline -- supabase/migrations)",
+      "Bash(npx --no-install playwright --version)",
+      "Bash(grep -n \"<X \\\\|{ X }\\\\|X,\" /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/\\\\\\(dashboard\\\\\\)/dashboard/live/\\\\[liveId\\\\]/rapid-console-client.tsx)",
+      "Bash(sed -i '' '1016s/DraggableProductCard product={product}/DraggableProductCard id={product.id}/' \"app/\\(dashboard\\)/dashboard/live/[liveId]/rapid-console-client.tsx\")",
+      "Bash(sed -i '' '1092s/DraggableProductCard product={product}/DraggableProductCard id={product.id}/' \"app/\\(dashboard\\)/dashboard/live/[liveId]/rapid-console-client.tsx\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(command -v chromium-cli)",
+      "Bash(npx --yes playwright --version)",
+      "Bash(mkdir -p /private/tmp/claude-501/-Users-walidbenmouffok-Desktop-Programmation-NextJs-flash-buy-web/6e13be1b-088e-4d4e-8292-dcb2aaa8c126/scratchpad/pw)",
+      "Bash(npm install *)",
+      "Bash(echo \"installing in background, pid $!\")",
+      "Bash(npx playwright *)",
+      "Bash(curl -s \"http://localhost:3000/_next/static/chunks/%5Broot-of-the-server%5D__0oah079._.css\" -o /tmp/app.css)",
+      "Bash(node check-orders2.js)",
+      "Bash(mkdir -p /private/tmp/claude-501/-Users-walidbenmouffok-Desktop-Programmation-NextJs-flash-buy-web/6e13be1b-088e-4d4e-8292-dcb2aaa8c126/scratchpad/pw4)",
+      "Bash(mkdir -p /private/tmp/claude-501/-Users-walidbenmouffok-Desktop-Programmation-NextJs-flash-buy-web/6e13be1b-088e-4d4e-8292-dcb2aaa8c126/scratchpad/pw5)",
+      "Bash(mkdir -p /private/tmp/claude-501/-Users-walidbenmouffok-Desktop-Programmation-NextJs-flash-buy-web/6e13be1b-088e-4d4e-8292-dcb2aaa8c126/scratchpad/pw6)",
+      "Bash(mkdir -p /private/tmp/claude-501/-Users-walidbenmouffok-Desktop-Programmation-NextJs-flash-buy-web/6e13be1b-088e-4d4e-8292-dcb2aaa8c126/scratchpad/pw7)",
+      "Bash(grep -rln '\"/live/\\\\|`/live/\\\\|app/live\\\\b' /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web --include=\"*.ts\" --include=\"*.tsx\" --include=\"*.md\")",
+      "Bash(grep -n '\"/live/\\\\|`/live/' /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/layout.tsx /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/README.md /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/spec-technique-flassh-buy.md /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/CLAUDE.md)",
+      "Bash(mkdir -p \"app/cart/[cartSlug]\")",
+      "Bash(rmdir \"app/live/[cartSlug]\" \"app/live\")",
+      "Bash(grep -rn '/live/\\\\${' /Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web --include=\"*.ts\" --include=\"*.tsx\")"
     ],
     "additionalDirectories": [
       "/private/tmp",
       "/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/(dashboard)/dashboard/catalogue",
       "/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/(dashboard)/dashboard/live",
-      "/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/live"
+      "/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/live",
+      "/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/(dashboard)/dashboard/live/[liveId]",
+      "/Users/walidbenmouffok/Desktop/Programmation/NextJs/flash-buy-web/app/live/[cartSlug]"
     ]
   }
 }

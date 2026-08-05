@@ -13,3 +13,5 @@ export type Product = Tables<"products">;
 export type ProductVariant = Tables<"product_variants">;
 export type Order = Tables<"orders">;
 export type OrderItem = Tables<"order_items">;
+export type PreparedProduct = Tables<"prepared_products">;
+export type ShippingMethodVariant = Tables<"shipping_method_variants">;

@@ -1,0 +1,15 @@
+-- PLACEHOLDER : cette migration a été appliquée directement au projet distant
+-- (probablement via le MCP Supabase) le 2026-08-03 sans que son fichier SQL
+-- ne soit committé ici, découvert le 2026-08-05 via `supabase migration list`
+-- (versions distantes sans fichier local correspondant). Le SQL original n'a
+-- pas pu être récupéré (non stocké par Supabase au-delà du fait qu'elle a été
+-- appliquée) — reconstituer un DDL approximatif à partir du seul schéma final
+-- aurait risqué de diverger de ce qui a réellement tourné. Ce fichier ne fait
+-- rien : son seul rôle est de garder l'historique de migrations cohérent
+-- (`supabase migration repair --status applied`) sans ré-exécuter du DDL déjà
+-- en place. Colonnes concernées (constatées sur `live_orders`, cf. schéma
+-- actuel) : shipping_weight_grams, shipping_method_variant_id,
+-- shipping_method_name, shipping_cost_cents, service_point_id,
+-- service_point_name, service_point_address, service_point_postal_code,
+-- service_point_city.
+select 1;

@@ -348,6 +348,7 @@ export type Database = {
         Row: {
           created_at: string
           design_size_stock_id: string | null
+          discount_cents: number
           id: string
           live_order_id: string
           match_score: number | null
@@ -365,6 +366,7 @@ export type Database = {
         Insert: {
           created_at?: string
           design_size_stock_id?: string | null
+          discount_cents?: number
           id?: string
           live_order_id: string
           match_score?: number | null
@@ -382,6 +384,7 @@ export type Database = {
         Update: {
           created_at?: string
           design_size_stock_id?: string | null
+          discount_cents?: number
           id?: string
           live_order_id?: string
           match_score?: number | null
@@ -434,6 +437,15 @@ export type Database = {
           created_at: string
           id: string
           live_id: string | null
+          service_point_address: string | null
+          service_point_city: string | null
+          service_point_id: number | null
+          service_point_name: string | null
+          service_point_postal_code: string | null
+          shipping_cost_cents: number | null
+          shipping_method_name: string | null
+          shipping_method_variant_id: string | null
+          shipping_weight_grams: number | null
           shop_id: string
           status: Database["public"]["Enums"]["live_order_status"]
           stripe_payment_intent: string | null
@@ -446,6 +458,15 @@ export type Database = {
           created_at?: string
           id?: string
           live_id?: string | null
+          service_point_address?: string | null
+          service_point_city?: string | null
+          service_point_id?: number | null
+          service_point_name?: string | null
+          service_point_postal_code?: string | null
+          shipping_cost_cents?: number | null
+          shipping_method_name?: string | null
+          shipping_method_variant_id?: string | null
+          shipping_weight_grams?: number | null
           shop_id: string
           status?: Database["public"]["Enums"]["live_order_status"]
           stripe_payment_intent?: string | null
@@ -458,6 +479,15 @@ export type Database = {
           created_at?: string
           id?: string
           live_id?: string | null
+          service_point_address?: string | null
+          service_point_city?: string | null
+          service_point_id?: number | null
+          service_point_name?: string | null
+          service_point_postal_code?: string | null
+          shipping_cost_cents?: number | null
+          shipping_method_name?: string | null
+          shipping_method_variant_id?: string | null
+          shipping_weight_grams?: number | null
           shop_id?: string
           status?: Database["public"]["Enums"]["live_order_status"]
           stripe_payment_intent?: string | null
@@ -480,6 +510,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "live_orders_shipping_method_variant_id_fkey"
+            columns: ["shipping_method_variant_id"]
+            isOneToOne: false
+            referencedRelation: "shipping_method_variants"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "live_orders_shop_id_fkey"
             columns: ["shop_id"]
             isOneToOne: false
@@ -491,6 +528,7 @@ export type Database = {
       live_products: {
         Row: {
           created_at: string
+          discount_tiers_cents: Json
           id: string
           internal_ref: string
           live_id: string
@@ -498,9 +536,12 @@ export type Database = {
           price_cents: number
           retired_at: string | null
           shop_id: string
+          simple_discount_cents: number
+          weight_grams: number | null
         }
         Insert: {
           created_at?: string
+          discount_tiers_cents?: Json
           id?: string
           internal_ref: string
           live_id: string
@@ -508,9 +549,12 @@ export type Database = {
           price_cents: number
           retired_at?: string | null
           shop_id: string
+          simple_discount_cents?: number
+          weight_grams?: number | null
         }
         Update: {
           created_at?: string
+          discount_tiers_cents?: Json
           id?: string
           internal_ref?: string
           live_id?: string
@@ -518,6 +562,8 @@ export type Database = {
           price_cents?: number
           retired_at?: string | null
           shop_id?: string
+          simple_discount_cents?: number
+          weight_grams?: number | null
         }
         Relationships: [
           {
@@ -536,6 +582,68 @@ export type Database = {
           },
         ]
       }
+      live_rapid_item_products: {
+        Row: {
+          created_at: string
+          discount_cents: number
+          id: string
+          live_order_item_id: string | null
+          live_product_id: string
+          live_rapid_item_id: string
+          quantity: number
+          shop_id: string
+        }
+        Insert: {
+          created_at?: string
+          discount_cents?: number
+          id?: string
+          live_order_item_id?: string | null
+          live_product_id: string
+          live_rapid_item_id: string
+          quantity?: number
+          shop_id: string
+        }
+        Update: {
+          created_at?: string
+          discount_cents?: number
+          id?: string
+          live_order_item_id?: string | null
+          live_product_id?: string
+          live_rapid_item_id?: string
+          quantity?: number
+          shop_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_rapid_item_products_live_order_item_id_fkey"
+            columns: ["live_order_item_id"]
+            isOneToOne: false
+            referencedRelation: "live_order_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_rapid_item_products_live_product_id_fkey"
+            columns: ["live_product_id"]
+            isOneToOne: false
+            referencedRelation: "live_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_rapid_item_products_live_rapid_item_id_fkey"
+            columns: ["live_rapid_item_id"]
+            isOneToOne: false
+            referencedRelation: "live_rapid_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_rapid_item_products_shop_id_fkey"
+            columns: ["shop_id"]
+            isOneToOne: false
+            referencedRelation: "shops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       live_rapid_items: {
         Row: {
           buyer_tiktok_username: string
@@ -543,12 +651,9 @@ export type Database = {
           id: string
           live_id: string
           live_order_id: string | null
-          live_order_item_id: string | null
-          live_product_id: string | null
           nickname: string | null
           order_number: number | null
           profile_picture_url: string | null
-          quantity: number
           received_at: string
           shop_id: string
           source_comment: string
@@ -560,12 +665,9 @@ export type Database = {
           id?: string
           live_id: string
           live_order_id?: string | null
-          live_order_item_id?: string | null
-          live_product_id?: string | null
           nickname?: string | null
           order_number?: number | null
           profile_picture_url?: string | null
-          quantity?: number
           received_at?: string
           shop_id: string
           source_comment: string
@@ -577,12 +679,9 @@ export type Database = {
           id?: string
           live_id?: string
           live_order_id?: string | null
-          live_order_item_id?: string | null
-          live_product_id?: string | null
           nickname?: string | null
           order_number?: number | null
           profile_picture_url?: string | null
-          quantity?: number
           received_at?: string
           shop_id?: string
           source_comment?: string
@@ -601,20 +700,6 @@ export type Database = {
             columns: ["live_order_id"]
             isOneToOne: false
             referencedRelation: "live_orders"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "live_rapid_items_live_order_item_id_fkey"
-            columns: ["live_order_item_id"]
-            isOneToOne: false
-            referencedRelation: "live_order_items"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "live_rapid_items_live_product_id_fkey"
-            columns: ["live_product_id"]
-            isOneToOne: false
-            referencedRelation: "live_products"
             referencedColumns: ["id"]
           },
           {
@@ -666,11 +751,13 @@ export type Database = {
       }
       lives: {
         Row: {
-          active_product_id: string | null
           claimed_at: string | null
           created_at: string
           ended_at: string | null
           euler_alert_id: string | null
+          euler_failing_since: string | null
+          euler_last_error: string | null
+          euler_status: string
           heartbeat_at: string | null
           id: string
           mode: string
@@ -686,11 +773,13 @@ export type Database = {
           worker_id: string | null
         }
         Insert: {
-          active_product_id?: string | null
           claimed_at?: string | null
           created_at?: string
           ended_at?: string | null
           euler_alert_id?: string | null
+          euler_failing_since?: string | null
+          euler_last_error?: string | null
+          euler_status?: string
           heartbeat_at?: string | null
           id?: string
           mode?: string
@@ -706,11 +795,13 @@ export type Database = {
           worker_id?: string | null
         }
         Update: {
-          active_product_id?: string | null
           claimed_at?: string | null
           created_at?: string
           ended_at?: string | null
           euler_alert_id?: string | null
+          euler_failing_since?: string | null
+          euler_last_error?: string | null
+          euler_status?: string
           heartbeat_at?: string | null
           id?: string
           mode?: string
@@ -726,13 +817,6 @@ export type Database = {
           worker_id?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "lives_active_product_id_fkey"
-            columns: ["active_product_id"]
-            isOneToOne: false
-            referencedRelation: "live_products"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "lives_shop_id_fkey"
             columns: ["shop_id"]
@@ -887,6 +971,47 @@ export type Database = {
           },
           {
             foreignKeyName: "orders_shop_id_fkey"
+            columns: ["shop_id"]
+            isOneToOne: false
+            referencedRelation: "shops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prepared_products: {
+        Row: {
+          created_at: string
+          discount_tiers_cents: Json
+          id: string
+          name: string
+          price_cents: number
+          shop_id: string
+          simple_discount_cents: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          discount_tiers_cents?: Json
+          id?: string
+          name: string
+          price_cents: number
+          shop_id: string
+          simple_discount_cents?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          discount_tiers_cents?: Json
+          id?: string
+          name?: string
+          price_cents?: number
+          shop_id?: string
+          simple_discount_cents?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prepared_products_shop_id_fkey"
             columns: ["shop_id"]
             isOneToOne: false
             referencedRelation: "shops"
@@ -1149,6 +1274,51 @@ export type Database = {
         }
         Relationships: []
       }
+      shipping_method_variants: {
+        Row: {
+          carrier: string
+          created_at: string
+          display_name: string
+          group_key: string
+          id: string
+          is_active: boolean
+          max_weight_grams: number
+          min_weight_grams: number
+          position: number
+          requires_service_point: boolean
+          sendcloud_name: string
+          updated_at: string
+        }
+        Insert: {
+          carrier: string
+          created_at?: string
+          display_name: string
+          group_key: string
+          id?: string
+          is_active?: boolean
+          max_weight_grams: number
+          min_weight_grams: number
+          position?: number
+          requires_service_point?: boolean
+          sendcloud_name: string
+          updated_at?: string
+        }
+        Update: {
+          carrier?: string
+          created_at?: string
+          display_name?: string
+          group_key?: string
+          id?: string
+          is_active?: boolean
+          max_weight_grams?: number
+          min_weight_grams?: number
+          position?: number
+          requires_service_point?: boolean
+          sendcloud_name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       shop_follows: {
         Row: {
           buyer_id: string
@@ -1245,9 +1415,13 @@ export type Database = {
           logo_url: string | null
           name: string
           owner_id: string
+          pending_order_expiry_minutes: number | null
           postal_code: string | null
+          sale_keywords: string[]
           siret: string | null
           tiktok_username: string | null
+          unpaid_order_ceiling_cents: number | null
+          unpaid_order_restriction: string
           updated_at: string
           verification_status: string
         }
@@ -1265,9 +1439,13 @@ export type Database = {
           logo_url?: string | null
           name: string
           owner_id: string
+          pending_order_expiry_minutes?: number | null
           postal_code?: string | null
+          sale_keywords?: string[]
           siret?: string | null
           tiktok_username?: string | null
+          unpaid_order_ceiling_cents?: number | null
+          unpaid_order_restriction?: string
           updated_at?: string
           verification_status?: string
         }
@@ -1285,9 +1463,13 @@ export type Database = {
           logo_url?: string | null
           name?: string
           owner_id?: string
+          pending_order_expiry_minutes?: number | null
           postal_code?: string | null
+          sale_keywords?: string[]
           siret?: string | null
           tiktok_username?: string | null
+          unpaid_order_ceiling_cents?: number | null
+          unpaid_order_restriction?: string
           updated_at?: string
           verification_status?: string
         }
@@ -1384,6 +1566,7 @@ export type Database = {
         }
         Returns: {
           created_at: string
+          discount_tiers_cents: Json
           id: string
           internal_ref: string
           live_id: string
@@ -1391,6 +1574,60 @@ export type Database = {
           price_cents: number
           retired_at: string | null
           shop_id: string
+          simple_discount_cents: number
+          weight_grams: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "live_products"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_live_product_from_prepared: {
+        Args: {
+          p_live_id: string
+          p_prepared_product_id: string
+          p_shop_id: string
+        }
+        Returns: {
+          created_at: string
+          discount_tiers_cents: Json
+          id: string
+          internal_ref: string
+          live_id: string
+          name: string
+          price_cents: number
+          retired_at: string | null
+          shop_id: string
+          simple_discount_cents: number
+          weight_grams: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "live_products"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_live_product_from_previous: {
+        Args: {
+          p_live_id: string
+          p_shop_id: string
+          p_source_live_product_id: string
+        }
+        Returns: {
+          created_at: string
+          discount_tiers_cents: Json
+          id: string
+          internal_ref: string
+          live_id: string
+          name: string
+          price_cents: number
+          retired_at: string | null
+          shop_id: string
+          simple_discount_cents: number
+          weight_grams: number | null
         }
         SetofOptions: {
           from: "*"
@@ -1415,12 +1652,25 @@ export type Database = {
       get_live_cart: {
         Args: { p_buyer: string; p_cart_slug: string }
         Returns: {
+          discount_cents: number
           item_id: string
           matched: boolean
           product_name: string
           quantity: number
           size_label: string
           unit_price_cents: number
+        }[]
+      }
+      get_live_cart_shipping_context: {
+        Args: { p_buyer: string; p_cart_slug: string }
+        Returns: {
+          carrier: string
+          display_name: string
+          group_key: string
+          requires_service_point: boolean
+          sendcloud_name: string
+          variant_id: string
+          weight_grams: number
         }[]
       }
       get_live_shop_by_slug: {
@@ -1447,6 +1697,15 @@ export type Database = {
           p_last_name: string
           p_phone: string
           p_postal_code: string
+          p_service_point_address: string
+          p_service_point_city: string
+          p_service_point_id: number
+          p_service_point_name: string
+          p_service_point_postal_code: string
+          p_shipping_cost_cents: number
+          p_shipping_method_name: string
+          p_shipping_method_variant_id: string
+          p_shipping_weight_grams: number
         }
         Returns: undefined
       }
@@ -1456,7 +1715,7 @@ export type Database = {
       }
     }
     Enums: {
-      live_order_status: "pending" | "validated" | "paid" | "cancelled"
+      live_order_status: "pending" | "paid" | "cancelled"
       live_status: "scheduled" | "live" | "ended"
     }
     CompositeTypes: {
@@ -1585,7 +1844,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      live_order_status: ["pending", "validated", "paid", "cancelled"],
+      live_order_status: ["pending", "paid", "cancelled"],
       live_status: ["scheduled", "live", "ended"],
     },
   },

@@ -128,14 +128,20 @@ pnpm run types:gen      # regenerate lib/database.types.ts — otherwise silent 
 ## Déploiement du worker
 
 Le worker Railway ne se met à jour que sur push vers `main` (déploiement
-automatique). **Tout changement dans `/worker` doit être commité ET poussé**
-— sans ça, le worker en production continue de tourner sur l'ancien code
-indéfiniment, silencieusement (aucune erreur visible tant qu'un vendeur ne
-teste pas la fonctionnalité changée). Si le changement ajoute une nouvelle
-variable d'environnement requise, elle doit être configurée sur Railway
-(service `flassh-buy-worker-v2`) **avant** le push, sinon le worker crashe au
-démarrage (`assertConfig()`) et les modes existants (catalog/freeform) sont
-aussi coupés.
+automatique). **Tout changement dans `/worker` doit être commité ET poussé
+vers `main` systématiquement, sans attendre que l'utilisateur le demande**
+— dès qu'une modification dans `/worker` est faite et validée (typecheck OK),
+commit + push directement, comme pour tout autre commit explicitement
+demandé. Sans ça, le worker en production continue de tourner sur l'ancien
+code indéfiniment, silencieusement (aucune erreur visible tant qu'un vendeur
+ne teste pas la fonctionnalité changée — c'est exactement ce qui a causé la
+régression du 2026-07-28 où `live_rapid_items` recevait encore
+`live_product_id`/`quantity`, des colonnes supprimées par une migration DB
+déjà appliquée mais jamais répercutées dans le code déployé). Si le
+changement ajoute une nouvelle variable d'environnement requise, elle doit
+être configurée sur Railway (service `flassh-buy-worker-v2`) **avant** le
+push, sinon le worker crashe au démarrage (`assertConfig()`) et les modes
+existants (catalog/freeform) sont aussi coupés.
 
 ## Environment variables
 
