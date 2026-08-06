@@ -8,7 +8,6 @@ import { Radio } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Spinner } from "@/components/ui/spinner";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
 
@@ -281,7 +280,10 @@ function ConnectingState({
 
   return (
     <div className="flex flex-col items-center gap-4 py-10 text-center">
-      <Spinner className="size-8 text-muted-foreground" />
+      <div className="relative size-12">
+        <div className="absolute size-12 rounded-full border-8 border-solid border-gray-200" />
+        <div className="absolute size-12 animate-spin rounded-full border-8 border-solid border-green-500 border-t-transparent" />
+      </div>
       <div>
         <p className="font-medium text-foreground">Connexion au live en cours…</p>
         <p className="text-sm text-muted-foreground">
