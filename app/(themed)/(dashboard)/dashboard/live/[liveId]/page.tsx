@@ -26,7 +26,7 @@ export default async function LiveConsolePage({
   const { data: live } = await supabase
     .from("lives")
     .select(
-      "id, status, started_at, sale_keywords, tiktok_username, worker_id, heartbeat_at, euler_status, euler_last_error, viewer_count, rapid_product_seq, rapid_intent_seq"
+      "id, status, started_at, sale_keywords, tiktok_username, worker_id, heartbeat_at, euler_status, euler_last_error, euler_ever_connected, viewer_count, rapid_product_seq, rapid_intent_seq"
     )
     .eq("id", liveId)
     .eq("shop_id", shop.id)
@@ -45,6 +45,19 @@ export default async function LiveConsolePage({
   if (live.status === "scheduled") {
     await supabase.from("lives").delete().eq("id", liveId).eq("shop_id", shop.id);
     redirect("/dashboard/lives/new");
+  }
+
+  // Un live "ended" qui n'a jamais atteint euler_status='connected' n'a
+  // jamais réellement fonctionné (ex. pseudo TikTok invalide, live pas
+  // réellement actif côté TikTok, abandonné par abandonFailedLive cf.
+  // /dashboard/lives/new) — contrairement à un vrai live terminé (à
+  // conserver pour son récapitulatif de commandes), sa console n'a rien
+  // d'utile à montrer. euler_ever_connected (jamais remis à false, cf.
+  // worker/src/live-session.ts markEulerConnected) est le seul signal fiable
+  // ici : euler_status seul ne suffirait pas, un vrai live qui a fonctionné
+  // peut aussi finir sur 'failing' après une coupure tardive.
+  if (live.status === "ended" && !live.euler_ever_connected) {
+    redirect("/dashboard/lives");
   }
 
   const { data: rapidProducts } = await supabase

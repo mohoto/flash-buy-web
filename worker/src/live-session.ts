@@ -125,10 +125,23 @@ function closeCommentChannel(liveId: string) {
 // prouve que "le process a bien ce live en charge", pas que la websocket
 // TikTok fonctionne. Sans ça, un pseudo TikTok invalide pouvait boucler en
 // close_4400 indéfiniment sans jamais rien signaler côté dashboard.
+//
+// euler_ever_connected passe à true ici et n'est JAMAIS remis à false
+// ensuite (contrairement à euler_status, qui reflète l'état COURANT et peut
+// redevenir 'failing' après une coupure tardive) — sert côté web
+// (/dashboard/live/[liveId]) à distinguer un live qui a réellement fonctionné
+// un moment d'un live jamais connecté du tout (ex. pseudo invalide, NOT_LIVE
+// immédiat) une fois qu'il est "ended" : seul le premier mérite une console
+// consultable après coup.
 async function markEulerConnected(liveId: string) {
   await supabase
     .from("lives")
-    .update({ euler_status: "connected", euler_last_error: null, euler_failing_since: null })
+    .update({
+      euler_status: "connected",
+      euler_last_error: null,
+      euler_failing_since: null,
+      euler_ever_connected: true,
+    })
     .eq("id", liveId)
     .neq("euler_status", "connected"); // évite une écriture à chaque frame reçue
 }

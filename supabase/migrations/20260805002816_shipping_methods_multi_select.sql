@@ -1,0 +1,11 @@
+-- PLACEHOLDER : cette migration a été appliquée directement au projet distant
+-- (probablement via le MCP Supabase, par une autre session en parallèle) sans
+-- que son fichier SQL ne soit committé ici, découvert le 2026-08-06 via
+-- `supabase migration list` (version distante sans fichier local
+-- correspondant). Le SQL original n'a pas pu être récupéré — reconstituer un
+-- DDL approximatif à partir du seul schéma final aurait risqué de diverger de
+-- ce qui a réellement tourné. Ce fichier ne fait rien : son seul rôle est de
+-- garder l'historique de migrations cohérent
+-- (`supabase migration repair --status applied`) sans ré-exécuter du DDL déjà
+-- en place. Même situation que 20260803025124/20260803143908.
+select 1;

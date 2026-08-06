@@ -755,6 +755,7 @@ export type Database = {
           created_at: string
           ended_at: string | null
           euler_alert_id: string | null
+          euler_ever_connected: boolean
           euler_failing_since: string | null
           euler_last_error: string | null
           euler_status: string
@@ -777,6 +778,7 @@ export type Database = {
           created_at?: string
           ended_at?: string | null
           euler_alert_id?: string | null
+          euler_ever_connected?: boolean
           euler_failing_since?: string | null
           euler_last_error?: string | null
           euler_status?: string
@@ -799,6 +801,7 @@ export type Database = {
           created_at?: string
           ended_at?: string | null
           euler_alert_id?: string | null
+          euler_ever_connected?: boolean
           euler_failing_since?: string | null
           euler_last_error?: string | null
           euler_status?: string
