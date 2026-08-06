@@ -78,14 +78,19 @@ export function connectToLive(
   tiktokUsername: string,
   handlers: {
     onOpen?: () => void;
-    // Toute frame Euler valide reçue (quel que soit son type) — signal fiable
-    // que la session est réellement établie, contrairement à onOpen qui se
-    // déclenche à l'ouverture TCP/WS, avant qu'Euler ait validé uniqueId
-    // (confirmé en pratique : "euler websocket opened" suivi immédiatement
-    // d'un close_4400 sur la même connexion). Ne pas confondre avec
-    // onComment/onViewerCount, qui ne couvrent qu'un sous-ensemble des types
-    // de frame et pourraient ne jamais se déclencher sur un live sans
-    // interaction.
+    // Une frame *contenu du live* réellement reçue (type "Webcast..." — chat,
+    // viewer count, cadeaux, etc.), PAS n'importe quelle enveloppe Euler.
+    // Signal fiable que la session est établie sur un live TikTok réellement
+    // actif, contrairement à onOpen (se déclenche à l'ouverture TCP/WS, avant
+    // qu'Euler ait validé uniqueId — confirmé : "euler websocket opened" peut
+    // être suivi immédiatement d'un close_4400) et contrairement à "n'importe
+    // quelle frame" (confirmé en pratique le 2026-08-06 : une frame
+    // "workerInfo" — méta-événement de connexion Euler, pas du contenu du
+    // live — arrivait AVANT un NOT_LIVE sur la même websocket, faisant
+    // passer euler_status à 'connected' pour un live qui n'était pas
+    // vraiment actif). Ne pas confondre avec onComment/onViewerCount, qui ne
+    // couvrent qu'un sous-ensemble des types Webcast et pourraient ne jamais
+    // se déclencher sur un live sans interaction.
     onFrameReceived?: () => void;
     onComment: (comment: LiveComment) => void;
     onViewerCount: (viewerCount: number) => void;
@@ -128,7 +133,14 @@ export function connectToLive(
       })
     );
 
-    handlers.onFrameReceived?.();
+    // Restreint aux vrais messages de contenu du live (type "Webcast...").
+    // Les enveloppes hors de ce préfixe (workerInfo, roomInfo, les
+    // synthetic join/leave, tiktok.disconnect, ...) sont des méta-événements
+    // de la connexion Euler elle-même — jamais une preuve que le live TikTok
+    // diffuse réellement. cf. commentaire sur onFrameReceived ci-dessus.
+    if (envelopes.some((e) => e.type.startsWith("Webcast"))) {
+      handlers.onFrameReceived?.();
+    }
 
     for (const envelope of envelopes) {
       if (envelope.type === "WebcastChatMessage") {

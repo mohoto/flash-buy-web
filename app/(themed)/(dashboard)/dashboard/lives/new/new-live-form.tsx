@@ -14,14 +14,16 @@ import { Field, FieldLabel, FieldDescription } from "@/components/ui/field";
 
 type EulerStatus = "connecting" | "connected" | "failing";
 
-// Le loader reste visible au moins ce temps-là même si la connexion réussit
-// quasi instantanément — évite un flash "form -> loader -> console" trop
-// abrupt qui donnerait l'impression que rien ne s'est passé.
-const MIN_LOADER_MS = 3_000;
-// Au-delà de ce délai sans jamais atteindre 'connected' ni 'failing' confirmé
-// (ex. aucun worker disponible pour claim le live), on abandonne comme pour
-// un échec Euler classique plutôt que de laisser le vendeur devant un loader
-// indéfini.
+// Un worker heartbeat toutes les HEARTBEAT_INTERVAL_MS (15s par défaut côté
+// worker, cf. worker/src/config.ts) — un heartbeat plus vieux que ça veut
+// dire soit que le worker n'a pas encore eu le temps de heartbeat une
+// première fois, soit qu'il a planté depuis. Marge généreuse (30s) pour ne
+// pas déclarer un worker "mort" par excès de zèle juste après le claim.
+const HEARTBEAT_FRESH_MS = 30_000;
+// Au-delà de ce délai sans jamais atteindre une connexion confirmée (euler_status
+// = 'connected' ET heartbeat récent ET live toujours "live"), on abandonne
+// comme pour un échec Euler classique plutôt que de laisser le vendeur devant
+// un loader indéfini.
 const CONNECTING_TIMEOUT_MS = 15_000;
 
 type Phase =
@@ -157,11 +159,33 @@ export function NewLiveForm({
   );
 }
 
-// Remplace le formulaire pendant l'attente de connexion : souscrit à
-// lives.euler_status pour CE live précis, avec un polling en filet de
-// sécurité (même pattern que ConnectionStatusProvider, cf.
-// live-connection-settings.tsx) — pas de contexte partagé ici, ce composant
-// est monté seul, une fois par tentative.
+type LiveConnectionRow = {
+  status: string;
+  heartbeat_at: string | null;
+  euler_status: EulerStatus;
+  euler_last_error: string | null;
+};
+
+function isHeartbeatFresh(heartbeatAt: string | null): boolean {
+  return !!heartbeatAt && Date.now() - new Date(heartbeatAt).getTime() <= HEARTBEAT_FRESH_MS;
+}
+
+// Remplace le formulaire pendant l'attente de connexion : souscrit à la ligne
+// `lives` de CE live précis, avec un polling en filet de sécurité (même
+// pattern que ConnectionStatusProvider, cf. live-connection-settings.tsx) —
+// pas de contexte partagé ici, ce composant est monté seul, une fois par
+// tentative.
+//
+// La connexion n'est considérée établie que si LES TROIS sont vrais en même
+// temps : euler_status = 'connected' (une vraie frame de contenu du live a
+// été reçue, cf. worker/src/euler.ts onFrameReceived), le live existe
+// toujours avec status = 'live' (pas terminé entre-temps, ex. NOT_LIVE
+// détecté juste après un faux "connected" — cf. bug du 2026-08-06 où une
+// frame technique "workerInfo" avait déclenché 'connected' juste avant un
+// NOT_LIVE), et le heartbeat du worker est récent (le process qui gère cette
+// connexion est réellement vivant, pas juste un dernier état écrit avant de
+// planter). euler_status seul ne suffit pas : rien ne garantit qu'il reste
+// vrai dans la seconde qui suit sans vérifier que le worker est toujours là.
 function ConnectingState({
   liveId,
   onFailed,
@@ -176,15 +200,12 @@ function ConnectingState({
   const resolvedRef = useRef(false);
 
   useEffect(() => {
-    const mountedAt = Date.now();
     const supabase = createClient();
 
     const resolveConnected = () => {
       if (resolvedRef.current) return;
       resolvedRef.current = true;
-      const elapsed = Date.now() - mountedAt;
-      const remaining = Math.max(0, MIN_LOADER_MS - elapsed);
-      setTimeout(() => router.push(`/dashboard/live/${liveId}`), remaining);
+      router.push(`/dashboard/live/${liveId}`);
     };
 
     const resolveFailed = (message: string) => {
@@ -198,34 +219,51 @@ function ConnectingState({
       onFailed(message);
     };
 
+    const evaluate = (row: LiveConnectionRow) => {
+      if (resolvedRef.current) return;
+      if (row.status !== "live") {
+        // Le live a été terminé entre-temps (ex. NOT_LIVE juste après un
+        // 'connected' prématuré, ou le vendeur/worker l'a arrêté) — jamais
+        // une vraie connexion établie, même si euler_status avait pu passer
+        // à 'connected' un instant avant.
+        resolveFailed(row.euler_last_error ?? "Le live TikTok n'est plus actif.");
+        return;
+      }
+      if (row.euler_status === "failing") {
+        resolveFailed(row.euler_last_error ?? "La connexion TikTok a échoué.");
+        return;
+      }
+      if (row.euler_status === "connected" && isHeartbeatFresh(row.heartbeat_at)) {
+        resolveConnected();
+      }
+    };
+
     const channel = supabase
       .channel(`live-connecting-${liveId}`)
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "lives", filter: `id=eq.${liveId}` },
-        (payload) => {
-          const next = payload.new as { euler_status: EulerStatus; euler_last_error: string | null };
-          if (next.euler_status === "connected") resolveConnected();
-          if (next.euler_status === "failing") {
-            resolveFailed(next.euler_last_error ?? "La connexion TikTok a échoué.");
-          }
-        }
+        (payload) => evaluate(payload.new as LiveConnectionRow)
       )
       .subscribe();
 
     // Filet de sécurité : comble un événement Realtime manqué (même pattern
-    // que ConnectionStatusProvider).
+    // que ConnectionStatusProvider) — sert aussi à réévaluer isHeartbeatFresh
+    // au fil du temps même sans nouvel UPDATE (un heartbeat qui vieillit sans
+    // jamais être renouvelé doit finir par ne plus être considéré "frais").
     const poll = setInterval(async () => {
       const { data } = await supabase
         .from("lives")
-        .select("euler_status, euler_last_error")
+        .select("status, heartbeat_at, euler_status, euler_last_error")
         .eq("id", liveId)
-        .single();
-      if (!data) return;
-      if (data.euler_status === "connected") resolveConnected();
-      if (data.euler_status === "failing") {
-        resolveFailed(data.euler_last_error ?? "La connexion TikTok a échoué.");
+        .maybeSingle();
+      if (!data) {
+        // Le live a disparu (ex. abandonné par une autre voie) — rien à
+        // récupérer, retour au formulaire.
+        resolveFailed("Le live a été interrompu, réessaie.");
+        return;
       }
+      evaluate(data as LiveConnectionRow);
     }, 2_000);
 
     const timeout = setTimeout(() => {
