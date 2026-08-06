@@ -20,7 +20,7 @@ export default async function NewLivePage() {
   return (
     <Card className="mx-auto w-full max-w-lg">
       <CardHeader>
-        <CardTitle>Connexion TikTok LIVE</CardTitle>
+        <CardTitle className="text-center">Connexion TikTok LIVE</CardTitle>
       </CardHeader>
       <CardContent>
         <NewLiveForm
