@@ -10,12 +10,17 @@ export default async function LivesPage() {
 
   const { data: lives } = await supabase
     .from("lives")
-    .select("id, status, started_at, ended_at, created_at")
+    .select("id, status, euler_status, started_at, ended_at, created_at")
     .eq("shop_id", shop.id)
     .order("created_at", { ascending: false });
 
+  // "live" ne suffit pas seul : un live encore en train de tenter sa toute
+  // première connexion (euler_status='connecting'/'failing', jamais
+  // confirmée) n'est pas un live "en cours" à rejoindre — même critère que
+  // findActiveLiveId (cf. lives/actions.ts), pour ne jamais proposer de
+  // "Rejoindre" un live qui n'a en réalité jamais fonctionné.
   const activeLive = (lives ?? []).find(
-    (l) => l.status === "live" || l.status === "scheduled"
+    (l) => l.status === "scheduled" || (l.status === "live" && l.euler_status === "connected")
   );
 
   return (

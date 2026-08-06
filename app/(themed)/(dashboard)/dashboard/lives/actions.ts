@@ -6,12 +6,22 @@ import { createClient } from "@/lib/supabase/server";
 import { getOwnShop } from "@/lib/dashboard/get-own-shop";
 import { normalizeTiktokUsername } from "@/lib/dashboard/normalize-tiktok-username";
 
-// Si un live scheduled/live existe déjà pour ce shop, y renvoyer plutôt que
-// d'en créer un second — sinon plusieurs lives actives pour le même shop
-// finissent chacune réclamée par le worker, qui ouvre alors plusieurs
-// connexions Euler concurrentes vers le même compte TikTok (cf. garde
-// équivalente côté webhook Euler Alert). Utilisé par /dashboard/lives (bouton
-// "Rejoindre"/"Démarrer un live") et par la page /lives/new elle-même.
+// Si un live RÉELLEMENT connecté (euler_status='connected', preuve qu'une
+// vraie frame de contenu du live a été reçue) existe déjà pour ce shop, y
+// renvoyer plutôt que d'en créer un second — sinon plusieurs lives actives
+// pour le même shop finissent chacune réclamée par le worker, qui ouvre alors
+// plusieurs connexions Euler concurrentes vers le même compte TikTok (cf.
+// garde équivalente côté webhook Euler Alert). Utilisé par /dashboard/lives
+// (bouton "Rejoindre"/"Démarrer un live") et par la page /lives/new
+// elle-même.
+//
+// Ne considère PAS "scheduled" ni "live" avec euler_status='connecting'
+// comme actif : un live encore en train de tenter sa toute première
+// connexion (cf. NewLiveForm/ConnectingState) ne doit jamais court-circuiter
+// une nouvelle tentative — bug observé le 2026-08-06 où resoumettre le
+// formulaire pendant qu'un live précédent était encore en 'connecting'
+// redirigeait directement vers ce live raté au lieu de laisser le nouveau
+// flux d'attente suivre son cours.
 export async function findActiveLiveId(): Promise<string | null> {
   const shop = await getOwnShop();
   const supabase = await createClient();
@@ -20,10 +30,35 @@ export async function findActiveLiveId(): Promise<string | null> {
     .from("lives")
     .select("id")
     .eq("shop_id", shop.id)
-    .in("status", ["scheduled", "live"])
+    .eq("status", "live")
+    .eq("euler_status", "connected")
     .maybeSingle();
 
   return existing?.id ?? null;
+}
+
+// Marque "ended" tout live de ce shop resté "live" sans jamais avoir
+// confirmé sa connexion (euler_status != 'connected') depuis plus de
+// STALE_CONNECTING_MS — filet de sécurité pour le cas où abandonFailedLive
+// (appelée côté client, cf. NewLiveForm) n'a jamais pu s'exécuter : le
+// vendeur a fermé l'onglet, rechargé la page, ou perdu la connexion pendant
+// que ConnectingState attendait encore une résolution. Sans ce nettoyage,
+// ces lives resteraient "live" indéfiniment en base (le worker, lui, finit
+// par les relâcher via NOT_LIVE/heartbeat, mais rien ne les repasse jamais à
+// "ended" côté web).
+const STALE_CONNECTING_MS = 60_000;
+
+async function cleanupStaleConnectingLives(shopId: string) {
+  const supabase = await createClient();
+  const staleBefore = new Date(Date.now() - STALE_CONNECTING_MS).toISOString();
+
+  await supabase
+    .from("lives")
+    .update({ status: "ended", ended_at: new Date().toISOString() })
+    .eq("shop_id", shopId)
+    .eq("status", "live")
+    .neq("euler_status", "connected")
+    .lt("started_at", staleBefore);
 }
 
 // Reprend le pseudo TikTok et les mots-clés de vente de la dernière live du
@@ -80,6 +115,13 @@ export async function createAndStartLive(
 ): Promise<{ liveId: string } | { error: string }> {
   const shop = await getOwnShop();
   const supabase = await createClient();
+
+  // Nettoie d'éventuels lives fantômes (tentative précédente jamais résolue
+  // côté client, cf. STALE_CONNECTING_MS) avant de vérifier s'il existe un
+  // vrai live actif — sinon un tel fantôme, bien que jamais connecté,
+  // pourrait continuer à exister indéfiniment sans jamais gêner
+  // findActiveLiveId (qui l'ignore déjà) mais en polluant l'historique.
+  await cleanupStaleConnectingLives(shop.id);
 
   const otherActiveId = await findActiveLiveId();
   if (otherActiveId) {
