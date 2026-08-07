@@ -223,13 +223,11 @@ export function ProductCatalogsList({ initialCatalogs }: { initialCatalogs: Cata
 // ensuite, une fois le catalogue créé, via ManageCatalogProductsDialog (le
 // catalogue doit exister avant de pouvoir lui rattacher des
 // prepared_products, cf. product_catalog_items.catalog_id).
-// "15 août" (sans année) pour rester court dans le nom auto-généré — cf.
-// formatScheduledFor plus bas, qui affiche lui la date complète avec année
-// sur les cartes déjà créées.
 function formatDateForName(dateStr: string): string {
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString("fr-FR", {
     day: "numeric",
     month: "long",
+    year: "numeric",
   });
 }
 
