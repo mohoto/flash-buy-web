@@ -1252,7 +1252,12 @@ function CatalogProductsPanel({
           </SelectTrigger>
           <SelectContent>
             {productCatalogs.map((catalog) => (
-              <SelectItem key={catalog.id} value={catalog.id}>
+              // label explicite (texte pur) : le children JSX composé
+              // ci-dessous (nom + date optionnelle) empêche Base UI d'en
+              // extraire automatiquement un libellé, et SelectValue retombe
+              // alors sur l'id brut affiché dans le champ — cf.
+              // resolveSelectedLabel (@base-ui/react/internals).
+              <SelectItem key={catalog.id} value={catalog.id} label={catalog.name}>
                 {catalog.name}
                 {catalog.scheduled_for &&
                   ` — ${new Date(`${catalog.scheduled_for}T00:00:00`).toLocaleDateString("fr-FR", {

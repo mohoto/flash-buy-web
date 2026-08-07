@@ -5,9 +5,11 @@ import { ChevronLeft, ChevronRight, Trash2, Plus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsList, TabsTab } from "@/components/ui/tabs";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverTrigger, PopoverContent, PopoverTitle } from "@/components/ui/popover";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import {
   Dialog,
@@ -36,10 +38,62 @@ import {
   deleteProductCatalog,
   getCatalogPreparedProducts,
   createPreparedProductInCatalog,
+  updatePreparedProductPrice,
+  updatePreparedProductDiscountTiers,
   removeProductFromCatalog,
 } from "./actions";
 
-type PreparedProduct = { id: string; name: string; price_cents: number };
+type PreparedProduct = {
+  id: string;
+  name: string;
+  price_cents: number;
+  discount_tiers_cents: Record<string, number>;
+  simple_discount_cents: number;
+};
+
+// Lecture défensive de discount_tiers_cents (typé Json côté généré, plus
+// large qu'un Record<string, number>) — même pattern que
+// rapid-console-client.tsx (console live).
+function parseDiscountTiers(json: unknown): Record<string, number> {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return {};
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(json as Record<string, unknown>)) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+// "2" -> "2ème", "1" -> "1er" — pour "Remise sur le Nème article".
+function ordinal(n: number): string {
+  return n === 1 ? "1er" : `${n}ème`;
+}
+
+function DiscountSummary({ product }: { product: PreparedProduct }) {
+  const tierEntries = Object.entries(product.discount_tiers_cents)
+    .map(([qty, cents]) => [Number(qty), cents] as const)
+    .sort(([a], [b]) => a - b);
+
+  if (tierEntries.length === 0 && product.simple_discount_cents === 0) return null;
+
+  const lines = [
+    ...tierEntries.map(
+      ([qty, cents]) => `Remise sur le ${ordinal(qty)} article : -${(cents / 100).toFixed(2)} €`
+    ),
+    ...(product.simple_discount_cents > 0
+      ? [`Remise simple : -${(product.simple_discount_cents / 100).toFixed(2)} €`]
+      : []),
+  ];
+
+  return (
+    <div className="flex flex-col gap-0.5 text-xs font-medium text-cyan-600 dark:text-cyan-400">
+      {lines.map((line) => (
+        <p key={line}>{line}</p>
+      ))}
+    </div>
+  );
+}
 
 type Catalog = {
   id: string;
@@ -397,7 +451,11 @@ function ManageCatalogProductsDialog({
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
     if (next && products === null) {
-      getCatalogPreparedProducts(catalog.id).then(setProducts);
+      getCatalogPreparedProducts(catalog.id).then((rows) =>
+        setProducts(
+          rows.map((p) => ({ ...p, discount_tiers_cents: parseDiscountTiers(p.discount_tiers_cents) }))
+        )
+      );
     }
   };
 
@@ -406,13 +464,20 @@ function ManageCatalogProductsDialog({
       const created = await createPreparedProductInCatalog(catalog.id, formData);
       if (created) {
         setProducts((prev) => {
-          const next = [...(prev ?? []), created];
+          const next = [
+            ...(prev ?? []),
+            { ...created, discount_tiers_cents: parseDiscountTiers(created.discount_tiers_cents) },
+          ];
           onProductCountChanged(next.length);
           return next;
         });
         formRef.current?.reset();
       }
     });
+  };
+
+  const handleProductChanged = (updated: PreparedProduct) => {
+    setProducts((prev) => (prev ?? []).map((p) => (p.id === updated.id ? updated : p)));
   };
 
   const handleRemove = (productId: string) => {
@@ -483,23 +548,28 @@ function ManageCatalogProductsDialog({
               <ul className="flex flex-col gap-2">
                 {products.map((product) => (
                   <li key={product.id} className="list-none">
-                    <div className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2">
+                    <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-foreground">{product.name}</p>
                         <p className="text-xs text-muted-foreground">
                           {(product.price_cents / 100).toFixed(2)} €
                         </p>
+                        <DiscountSummary product={product} />
                       </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={isPending}
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => handleRemove(product.id)}
-                      >
-                        <Trash2 />
-                      </Button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <EditablePreparedPrice product={product} onChanged={handleProductChanged} />
+                        <EditablePreparedDiscountTiers product={product} onChanged={handleProductChanged} />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={isPending}
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => handleRemove(product.id)}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
                     </div>
                   </li>
                 ))}
@@ -512,6 +582,199 @@ function ManageCatalogProductsDialog({
         </DialogFooter>
       </DialogPopup>
     </Dialog>
+  );
+}
+
+// Même configuration que les produits créés à la volée dans la console live
+// (EditablePrice, cf. worker/../rapid-console-client.tsx) : bouton
+// déclencheur, champs nom + prix, Annuler/Valider dans le popover.
+function EditablePreparedPrice({
+  product,
+  onChanged,
+}: {
+  product: PreparedProduct;
+  onChanged: (product: PreparedProduct) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<Button type="button" size="sm" variant="outline">Modifier</Button>} />
+      <PopoverContent align="end" className="w-56">
+        <PopoverTitle className="mb-3 text-sm">Modifier le produit</PopoverTitle>
+        <form
+          action={(formData) => {
+            setOpen(false);
+            startTransition(async () => {
+              await updatePreparedProductPrice(product.id, formData);
+              const name = String(formData.get("name") ?? product.name).trim() || product.name;
+              const priceEuros = Number(formData.get("price") ?? product.price_cents / 100);
+              onChanged({
+                ...product,
+                name,
+                price_cents:
+                  Number.isFinite(priceEuros) && priceEuros > 0
+                    ? Math.round(priceEuros * 100)
+                    : product.price_cents,
+              });
+            });
+          }}
+          className="flex flex-col gap-3"
+        >
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor={`name-${product.id}`} className="text-xs">
+              Nom
+            </FieldLabel>
+            <Input
+              key={`${product.id}-${product.name}`}
+              id={`name-${product.id}`}
+              name="name"
+              autoFocus
+              defaultValue={product.name}
+            />
+          </Field>
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor={`price-${product.id}`} className="text-xs">
+              Prix (€)
+            </FieldLabel>
+            <Input
+              key={`${product.id}-${product.price_cents}`}
+              id={`price-${product.id}`}
+              name="price"
+              type="number"
+              min={0}
+              step="0.01"
+              required
+              defaultValue={(product.price_cents / 100).toFixed(2)}
+            />
+          </Field>
+          <div className="mt-1 flex justify-end gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>
+              Annuler
+            </Button>
+            <Button type="submit" size="sm" disabled={isPending}>
+              Valider
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Remises par quantité exacte (1 à 8, en euros) — même configuration que
+// EditableDiscountTiers (console live).
+function EditablePreparedDiscountTiers({
+  product,
+  onChanged,
+}: {
+  product: PreparedProduct;
+  onChanged: (product: PreparedProduct) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const resetAllToZero = () => {
+    formRef.current?.querySelectorAll<HTMLInputElement>('input[type="number"]').forEach((input) => {
+      input.value = "";
+    });
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<Button type="button" size="sm" variant="outline">Remises</Button>} />
+      <PopoverContent align="end" className="w-96">
+        <PopoverTitle className="mb-3 text-sm">Remises par quantité</PopoverTitle>
+        <form
+          ref={formRef}
+          action={(formData) => {
+            setOpen(false);
+            startTransition(async () => {
+              await updatePreparedProductDiscountTiers(product.id, formData);
+
+              const tiers: Record<string, number> = {};
+              for (let qty = 1; qty <= 8; qty++) {
+                const raw = formData.get(`discount_${qty}`);
+                const euros = raw === null || raw === "" ? null : Number(raw);
+                if (euros !== null && Number.isFinite(euros) && euros > 0) {
+                  tiers[String(qty)] = Math.round(euros * 100);
+                }
+              }
+              const rawSimple = formData.get("discount_simple");
+              const simpleEuros = rawSimple === null || rawSimple === "" ? null : Number(rawSimple);
+              const simpleDiscountCents =
+                simpleEuros !== null && Number.isFinite(simpleEuros) && simpleEuros > 0
+                  ? Math.round(simpleEuros * 100)
+                  : 0;
+
+              onChanged({ ...product, discount_tiers_cents: tiers, simple_discount_cents: simpleDiscountCents });
+            });
+          }}
+          className="flex flex-col gap-2"
+        >
+          <Field className="gap-1">
+            <FieldLabel htmlFor={`discount-simple-${product.id}`} className="text-xs">
+              Remise simple (€)
+            </FieldLabel>
+            <Input
+              id={`discount-simple-${product.id}`}
+              name="discount_simple"
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder="0.00"
+              defaultValue={
+                product.simple_discount_cents ? (product.simple_discount_cents / 100).toFixed(2) : ""
+              }
+            />
+          </Field>
+
+          <Separator className="my-1" />
+
+          <p className="text-xs text-muted-foreground">
+            Remises par quantité exacte (prioritaires sur la remise simple)
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {Array.from({ length: 8 }, (_, i) => i + 1).map((qty) => (
+              <Field key={qty} className="gap-1">
+                <FieldLabel htmlFor={`discount-${product.id}-${qty}`} className="text-xs">
+                  {qty}×
+                </FieldLabel>
+                <Input
+                  id={`discount-${product.id}-${qty}`}
+                  name={`discount_${qty}`}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="0.00"
+                  defaultValue={
+                    product.discount_tiers_cents[String(qty)]
+                      ? (product.discount_tiers_cents[String(qty)] / 100).toFixed(2)
+                      : ""
+                  }
+                />
+              </Field>
+            ))}
+          </div>
+
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={resetAllToZero}>
+              Réinitialiser à 0
+            </Button>
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>
+                Annuler
+              </Button>
+              <Button type="submit" size="sm" variant="success" disabled={isPending}>
+                Valider
+              </Button>
+            </div>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
   );
 }
 

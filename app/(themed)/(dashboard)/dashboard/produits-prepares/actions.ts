@@ -50,7 +50,15 @@ export async function createPreparedProduct(formData: FormData) {
   return created;
 }
 
-export async function updatePreparedProduct(productId: string, formData: FormData) {
+// Deux actions séparées (prix vs remises) plutôt qu'un update complet — même
+// pattern que updateRapidProductPrice/updateRapidProductDiscountTiers
+// (rapid-actions.ts, console live), pour la même raison : les popovers
+// "Modifier"/"Remises" (EditablePreparedPrice/EditablePreparedDiscountTiers,
+// cf. product-catalogs-list.tsx) soumettent chacun un formulaire PARTIEL —
+// une seule action combinée aurait silencieusement écrasé les remises à
+// chaque changement de prix (et inversement, jamais appliqué les remises
+// faute de "name"/"price" dans ce formulaire-là).
+export async function updatePreparedProductPrice(productId: string, formData: FormData) {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
@@ -60,9 +68,20 @@ export async function updatePreparedProduct(productId: string, formData: FormDat
 
   await supabase
     .from("prepared_products")
+    .update({ name, price_cents: Math.round(priceEuros * 100) })
+    .eq("id", productId)
+    .eq("shop_id", shop.id);
+
+  revalidatePath("/dashboard/produits-prepares");
+}
+
+export async function updatePreparedProductDiscountTiers(productId: string, formData: FormData) {
+  const shop = await getOwnShop();
+  const supabase = await createClient();
+
+  await supabase
+    .from("prepared_products")
     .update({
-      name,
-      price_cents: Math.round(priceEuros * 100),
       discount_tiers_cents: parseDiscountTiers(formData),
       simple_discount_cents: parseSimpleDiscountCents(formData),
     })
@@ -154,16 +173,25 @@ export async function deleteProductCatalog(catalogId: string) {
 // "Gérer les produits" (cf. ManageCatalogProductsDialog), pas au chargement
 // de la page. Nom distinct de getCatalogProducts (rapid-actions.ts, console
 // live) bien que la requête soit proche : signatures de retour différentes
-// (celle-ci n'a pas besoin des remises), modules séparés sans import croisé.
+// (celle-ci inclut les remises pour EditablePrice/EditableDiscountTiers,
+// cf. product-catalogs-list.tsx), modules séparés sans import croisé.
 export async function getCatalogPreparedProducts(catalogId: string): Promise<
-  { id: string; name: string; price_cents: number }[]
+  {
+    id: string;
+    name: string;
+    price_cents: number;
+    discount_tiers_cents: unknown;
+    simple_discount_cents: number;
+  }[]
 > {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
   const { data } = await supabase
     .from("product_catalog_items")
-    .select("prepared_products!inner(id, name, price_cents, shop_id)")
+    .select(
+      "prepared_products!inner(id, name, price_cents, discount_tiers_cents, simple_discount_cents, shop_id)"
+    )
     .eq("catalog_id", catalogId)
     .eq("prepared_products.shop_id", shop.id);
 
@@ -173,11 +201,20 @@ export async function getCatalogPreparedProducts(catalogId: string): Promise<
 // Crée un prepared_product ET l'attache immédiatement à CE catalogue, en une
 // seule action — c'est la seule façon de créer un produit préparé désormais
 // (plus de formulaire de création indépendant, cf. suppression de
-// PreparedProductsList).
+// PreparedProductsList). Les remises se règlent ensuite via
+// updatePreparedProduct (même configuration Modifier/Remises que les
+// produits créés à la volée, cf. EditablePrice/EditableDiscountTiers dans la
+// console live).
 export async function createPreparedProductInCatalog(
   catalogId: string,
   formData: FormData
-): Promise<{ id: string; name: string; price_cents: number } | null> {
+): Promise<{
+  id: string;
+  name: string;
+  price_cents: number;
+  discount_tiers_cents: unknown;
+  simple_discount_cents: number;
+} | null> {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
@@ -194,7 +231,7 @@ export async function createPreparedProductInCatalog(
       discount_tiers_cents: parseDiscountTiers(formData),
       simple_discount_cents: parseSimpleDiscountCents(formData),
     })
-    .select("id, name, price_cents")
+    .select("id, name, price_cents, discount_tiers_cents, simple_discount_cents")
     .single();
 
   if (error || !product) return null;
