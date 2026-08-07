@@ -82,13 +82,20 @@ export async function deletePreparedProduct(productId: string) {
 }
 
 // ── Catalogues (product_catalogs) ──────────────────────────────────────────
-// Regroupements nommés de produits préparés existants (many-to-many via
+// Regroupements nommés de produits préparés (many-to-many via
 // product_catalog_items), pensés pour préparer à l'avance la sélection d'un
 // live précis (ex. "Catalogue du 15 août") — choisis ensuite dans l'onglet
 // Catalogue de /dashboard/live/[liveId] (cf. CatalogProductsPanel). Un
 // catalogue reste disponible indéfiniment après usage, jamais "consommé" :
 // scheduled_for est purement indicatif, n'empêche jamais de le réutiliser
 // sur un live à une autre date.
+//
+// Un prepared_product naît toujours à l'intérieur d'un catalogue (cf.
+// createPreparedProductInCatalog) — il n'existe plus de bibliothèque plate
+// indépendante à la racine de cette page (l'ancienne section "Produits
+// préparés" a été retirée) ; createPreparedProduct/updatePreparedProduct/
+// deletePreparedProduct ci-dessus restent néanmoins valides et réutilisées
+// telles quelles.
 
 export async function createProductCatalog(formData: FormData) {
   const shop = await getOwnShop();
@@ -98,7 +105,6 @@ export async function createProductCatalog(formData: FormData) {
   if (!name) return null;
 
   const scheduledFor = String(formData.get("scheduled_for") ?? "").trim() || null;
-  const productIds = formData.getAll("product_ids").map(String).filter(Boolean);
 
   const { data: catalog, error } = await supabase
     .from("product_catalogs")
@@ -108,17 +114,8 @@ export async function createProductCatalog(formData: FormData) {
 
   if (error || !catalog) return null;
 
-  if (productIds.length > 0) {
-    await supabase.from("product_catalog_items").insert(
-      productIds.map((preparedProductId) => ({
-        catalog_id: catalog.id,
-        prepared_product_id: preparedProductId,
-      }))
-    );
-  }
-
   revalidatePath("/dashboard/produits-prepares");
-  return { ...catalog, product_count: productIds.length };
+  return { ...catalog, product_count: 0 };
 }
 
 export async function updateProductCatalog(catalogId: string, formData: FormData) {
@@ -129,26 +126,12 @@ export async function updateProductCatalog(catalogId: string, formData: FormData
   if (!name) return;
 
   const scheduledFor = String(formData.get("scheduled_for") ?? "").trim() || null;
-  const productIds = formData.getAll("product_ids").map(String).filter(Boolean);
 
   await supabase
     .from("product_catalogs")
     .update({ name, scheduled_for: scheduledFor })
     .eq("id", catalogId)
     .eq("shop_id", shop.id);
-
-  // Remplace entièrement la composition du catalogue plutôt que de calculer
-  // un diff — plus simple et largement suffisant vu le volume attendu
-  // (quelques dizaines de produits par catalogue au plus).
-  await supabase.from("product_catalog_items").delete().eq("catalog_id", catalogId);
-  if (productIds.length > 0) {
-    await supabase.from("product_catalog_items").insert(
-      productIds.map((preparedProductId) => ({
-        catalog_id: catalogId,
-        prepared_product_id: preparedProductId,
-      }))
-    );
-  }
 
   revalidatePath("/dashboard/produits-prepares");
 }
@@ -159,22 +142,84 @@ export async function deleteProductCatalog(catalogId: string) {
 
   // Ne supprime jamais les prepared_products qu'il contenait — seulement le
   // regroupement lui-même (product_catalog_items suit via ON DELETE CASCADE).
+  // Les produits restent en base, orphelins de tout catalogue, mais ne sont
+  // plus proposés nulle part côté UI (plus de bibliothèque à plat) —
+  // acceptable, cohérent avec "un produit vit dans un catalogue".
   await supabase.from("product_catalogs").delete().eq("id", catalogId).eq("shop_id", shop.id);
 
   revalidatePath("/dashboard/produits-prepares");
 }
 
-// Composition détaillée d'un catalogue (utilisée pour pré-cocher les
-// produits déjà inclus au moment d'éditer sa composition).
-export async function getProductCatalogItems(catalogId: string): Promise<string[]> {
+// Composition détaillée d'un catalogue — appelée à l'ouverture de la popup
+// "Gérer les produits" (cf. ManageCatalogProductsDialog), pas au chargement
+// de la page. Nom distinct de getCatalogProducts (rapid-actions.ts, console
+// live) bien que la requête soit proche : signatures de retour différentes
+// (celle-ci n'a pas besoin des remises), modules séparés sans import croisé.
+export async function getCatalogPreparedProducts(catalogId: string): Promise<
+  { id: string; name: string; price_cents: number }[]
+> {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
   const { data } = await supabase
     .from("product_catalog_items")
-    .select("prepared_product_id, product_catalogs!inner(shop_id)")
+    .select("prepared_products!inner(id, name, price_cents, shop_id)")
     .eq("catalog_id", catalogId)
-    .eq("product_catalogs.shop_id", shop.id);
+    .eq("prepared_products.shop_id", shop.id);
 
-  return (data ?? []).map((row) => row.prepared_product_id);
+  return (data ?? []).map((row) => row.prepared_products);
+}
+
+// Crée un prepared_product ET l'attache immédiatement à CE catalogue, en une
+// seule action — c'est la seule façon de créer un produit préparé désormais
+// (plus de formulaire de création indépendant, cf. suppression de
+// PreparedProductsList).
+export async function createPreparedProductInCatalog(
+  catalogId: string,
+  formData: FormData
+): Promise<{ id: string; name: string; price_cents: number } | null> {
+  const shop = await getOwnShop();
+  const supabase = await createClient();
+
+  const name = String(formData.get("name") ?? "").trim();
+  const priceEuros = Number(formData.get("price") ?? 0);
+  if (!name || !Number.isFinite(priceEuros) || priceEuros <= 0) return null;
+
+  const { data: product, error } = await supabase
+    .from("prepared_products")
+    .insert({
+      shop_id: shop.id,
+      name,
+      price_cents: Math.round(priceEuros * 100),
+      discount_tiers_cents: parseDiscountTiers(formData),
+      simple_discount_cents: parseSimpleDiscountCents(formData),
+    })
+    .select("id, name, price_cents")
+    .single();
+
+  if (error || !product) return null;
+
+  await supabase
+    .from("product_catalog_items")
+    .insert({ catalog_id: catalogId, prepared_product_id: product.id });
+
+  revalidatePath("/dashboard/produits-prepares");
+  return product;
+}
+
+// Retire un produit du catalogue SANS le supprimer (cf. deleteProductCatalog
+// — même principe : product_catalog_items est un lien, pas le produit
+// lui-même). Le produit reste en base, orphelin, mais n'est plus proposé
+// dans l'onglet Catalogue via ce catalogue.
+export async function removeProductFromCatalog(catalogId: string, preparedProductId: string) {
+  await getOwnShop();
+  const supabase = await createClient();
+
+  await supabase
+    .from("product_catalog_items")
+    .delete()
+    .eq("catalog_id", catalogId)
+    .eq("prepared_product_id", preparedProductId);
+
+  revalidatePath("/dashboard/produits-prepares");
 }

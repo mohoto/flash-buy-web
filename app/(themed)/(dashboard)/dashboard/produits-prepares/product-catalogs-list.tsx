@@ -1,21 +1,25 @@
 "use client";
 
 import { useMemo, useRef, useState, useTransition } from "react";
-import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Trash2, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTab } from "@/components/ui/tabs";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-  PopoverTitle,
-} from "@/components/ui/popover";
+  Dialog,
+  DialogTrigger,
+  DialogPopup,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogPanel,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogTrigger,
@@ -30,7 +34,9 @@ import {
   createProductCatalog,
   updateProductCatalog,
   deleteProductCatalog,
-  getProductCatalogItems,
+  getCatalogPreparedProducts,
+  createPreparedProductInCatalog,
+  removeProductFromCatalog,
 } from "./actions";
 
 type PreparedProduct = { id: string; name: string; price_cents: number };
@@ -122,13 +128,7 @@ function formatPeriodLabel(anchor: Date, range: Range): string {
   return anchor.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
 }
 
-export function ProductCatalogsList({
-  initialCatalogs,
-  preparedProducts,
-}: {
-  initialCatalogs: Catalog[];
-  preparedProducts: PreparedProduct[];
-}) {
+export function ProductCatalogsList({ initialCatalogs }: { initialCatalogs: Catalog[] }) {
   const [catalogs, setCatalogs] = useState(initialCatalogs);
   const [range, setRange] = useState<Range>("all");
   const [anchor, setAnchor] = useState(() => new Date());
@@ -145,11 +145,6 @@ export function ProductCatalogsList({
 
   return (
     <div className="flex flex-col gap-6">
-      <CreateCatalogForm
-        preparedProducts={preparedProducts}
-        onCreated={(catalog) => setCatalogs((prev) => [catalog, ...prev])}
-      />
-
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs value={range} onValueChange={(value) => setRange(value as Range)}>
           <TabsList>
@@ -161,34 +156,38 @@ export function ProductCatalogsList({
           </TabsList>
         </Tabs>
 
-        {range !== "all" && (
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label="Période précédente"
-              onClick={() => setAnchor((prev) => addRange(prev, range, -1))}
-            >
-              <ChevronLeft />
-            </Button>
-            <span className="min-w-40 text-center text-sm capitalize text-foreground">
-              {formatPeriodLabel(anchor, range)}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label="Période suivante"
-              onClick={() => setAnchor((prev) => addRange(prev, range, 1))}
-            >
-              <ChevronRight />
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => setAnchor(new Date())}>
-              Auj.
-            </Button>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {range !== "all" && (
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="Période précédente"
+                onClick={() => setAnchor((prev) => addRange(prev, range, -1))}
+              >
+                <ChevronLeft />
+              </Button>
+              <span className="min-w-40 text-center text-sm capitalize text-foreground">
+                {formatPeriodLabel(anchor, range)}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="Période suivante"
+                onClick={() => setAnchor((prev) => addRange(prev, range, 1))}
+              >
+                <ChevronRight />
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setAnchor(new Date())}>
+                Auj.
+              </Button>
+            </div>
+          )}
+
+          <CreateCatalogDialog onCreated={(catalog) => setCatalogs((prev) => [catalog, ...prev])} />
+        </div>
       </div>
 
       {filteredCatalogs.length === 0 ? (
@@ -197,7 +196,7 @@ export function ProductCatalogsList({
             <EmptyTitle>Aucun catalogue</EmptyTitle>
             <EmptyDescription>
               {range === "all"
-                ? "Crée un catalogue ci-dessus pour le retrouver dans l'onglet \"Catalogue\" de tes prochains lives."
+                ? "Crée un catalogue pour le retrouver dans l'onglet \"Catalogue\" de tes prochains lives."
                 : "Aucun catalogue prévu sur cette période."}
             </EmptyDescription>
           </EmptyHeader>
@@ -208,7 +207,6 @@ export function ProductCatalogsList({
             <li key={catalog.id} className="list-none">
               <CatalogCard
                 catalog={catalog}
-                preparedProducts={preparedProducts}
                 onChanged={(updated) =>
                   setCatalogs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
                 }
@@ -222,88 +220,59 @@ export function ProductCatalogsList({
   );
 }
 
-function CreateCatalogForm({
-  preparedProducts,
-  onCreated,
-}: {
-  preparedProducts: PreparedProduct[];
-  onCreated: (catalog: Catalog) => void;
-}) {
+// Popup de création : nom + date prévue uniquement — les produits se gèrent
+// ensuite, une fois le catalogue créé, via ManageCatalogProductsDialog (le
+// catalogue doit exister avant de pouvoir lui rattacher des
+// prepared_products, cf. product_catalog_items.catalog_id).
+function CreateCatalogDialog({ onCreated }: { onCreated: (catalog: Catalog) => void }) {
+  const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const formRef = useRef<HTMLFormElement>(null);
 
-  const toggle = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   return (
-    <Card>
-      <CardContent className="flex flex-col gap-4 py-4">
-        <form
-          ref={formRef}
-          action={(formData) => {
-            for (const id of selectedIds) formData.append("product_ids", id);
-            startTransition(async () => {
-              const created = await createProductCatalog(formData);
-              if (created) onCreated(created);
-            });
-            formRef.current?.reset();
-            setSelectedIds(new Set());
-          }}
-          className="flex flex-col gap-4"
-        >
-          <div className="flex flex-wrap items-end gap-3">
-            <Field className="w-56 gap-1.5">
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={<Button type="button"><Plus />Créer un catalogue</Button>} />
+      <DialogPopup>
+        <DialogHeader>
+          <DialogTitle>Créer un catalogue</DialogTitle>
+          <DialogDescription>
+            Tu pourras y ajouter des produits une fois le catalogue créé.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <form
+            ref={formRef}
+            id="create-catalog-form"
+            action={(formData) => {
+              startTransition(async () => {
+                const created = await createProductCatalog(formData);
+                if (created) {
+                  onCreated(created);
+                  setOpen(false);
+                  formRef.current?.reset();
+                }
+              });
+            }}
+            className="flex flex-col gap-4"
+          >
+            <Field className="gap-1.5">
               <FieldLabel htmlFor="catalog-name">Nom du catalogue</FieldLabel>
-              <Input id="catalog-name" name="name" placeholder="Ex : Catalogue du 15 août" required />
+              <Input id="catalog-name" name="name" placeholder="Ex : Catalogue du 15 août" autoFocus required />
             </Field>
-            <Field className="w-40 gap-1.5">
+            <Field className="gap-1.5">
               <FieldLabel htmlFor="catalog-scheduled-for">Date prévue</FieldLabel>
               <Input id="catalog-scheduled-for" name="scheduled_for" type="date" nativeInput />
             </Field>
-          </div>
-
-          {preparedProducts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Ajoute d&apos;abord des produits préparés ci-dessus pour pouvoir les regrouper ici.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs font-medium text-muted-foreground">
-                Produits inclus ({selectedIds.size})
-              </p>
-              <div className="grid max-h-48 grid-cols-1 gap-1 overflow-y-auto rounded-lg border p-2 sm:grid-cols-2">
-                {preparedProducts.map((product) => (
-                  <label
-                    key={product.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
-                  >
-                    <Checkbox
-                      checked={selectedIds.has(product.id)}
-                      onCheckedChange={() => toggle(product.id)}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-foreground">{product.name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {(product.price_cents / 100).toFixed(2)} €
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <Button type="submit" disabled={isPending} className="self-start">
-            Créer le catalogue
+          </form>
+        </DialogPanel>
+        <DialogFooter>
+          <DialogClose render={<Button variant="secondary">Annuler</Button>} />
+          <Button type="submit" form="create-catalog-form" disabled={isPending}>
+            Créer
           </Button>
-        </form>
-      </CardContent>
-    </Card>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -318,12 +287,10 @@ function formatScheduledFor(scheduledFor: string | null): string {
 
 function CatalogCard({
   catalog,
-  preparedProducts,
   onChanged,
   onDeleted,
 }: {
   catalog: Catalog;
-  preparedProducts: PreparedProduct[];
   onChanged: (catalog: Catalog) => void;
   onDeleted: (id: string) => void;
 }) {
@@ -341,12 +308,12 @@ function CatalogCard({
           {catalog.product_count} produit{catalog.product_count > 1 ? "s" : ""}
         </Badge>
 
-        <div className="mt-2 flex items-center justify-end gap-2 border-t pt-3">
-          <EditCatalogPopover
+        <div className="mt-2 flex flex-wrap items-center justify-end gap-2 border-t pt-3">
+          <ManageCatalogProductsDialog
             catalog={catalog}
-            preparedProducts={preparedProducts}
-            onChanged={onChanged}
+            onProductCountChanged={(count) => onChanged({ ...catalog, product_count: count })}
           />
+          <EditCatalogDialog catalog={catalog} onChanged={onChanged} />
           <DeleteCatalogButton
             isPending={isPending}
             onDeleted={() =>
@@ -362,120 +329,207 @@ function CatalogCard({
   );
 }
 
-function EditCatalogPopover({
+// Popup dédiée à la composition du catalogue : liste les produits déjà
+// inclus (retirables un par un) et permet d'en créer un nouveau directement
+// ici — createPreparedProductInCatalog crée le prepared_product ET l'attache
+// à ce catalogue en une seule action, pas de bibliothèque à plat à cocher
+// séparément (cf. suppression de "Produits préparés" sur cette page).
+function ManageCatalogProductsDialog({
   catalog,
-  preparedProducts,
+  onProductCountChanged,
+}: {
+  catalog: Catalog;
+  onProductCountChanged: (count: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [products, setProducts] = useState<PreparedProduct[] | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // Chargé à l'ouverture plutôt qu'au rendu de la carte (rarement consulté,
+  // ne vaut pas d'alourdir le fetch initial) — même pattern que "Reprendre un
+  // live précédent" dans la console live.
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next && products === null) {
+      getCatalogPreparedProducts(catalog.id).then(setProducts);
+    }
+  };
+
+  const handleCreate = (formData: FormData) => {
+    startTransition(async () => {
+      const created = await createPreparedProductInCatalog(catalog.id, formData);
+      if (created) {
+        setProducts((prev) => {
+          const next = [...(prev ?? []), created];
+          onProductCountChanged(next.length);
+          return next;
+        });
+        formRef.current?.reset();
+      }
+    });
+  };
+
+  const handleRemove = (productId: string) => {
+    startTransition(async () => {
+      await removeProductFromCatalog(catalog.id, productId);
+      setProducts((prev) => {
+        const next = (prev ?? []).filter((p) => p.id !== productId);
+        onProductCountChanged(next.length);
+        return next;
+      });
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger render={<Button type="button" size="sm" variant="outline">Gérer les produits</Button>} />
+      <DialogPopup>
+        <DialogHeader>
+          <DialogTitle>Produits — {catalog.name}</DialogTitle>
+          <DialogDescription>
+            Ajoute des produits directement ici, ils rejoignent ce catalogue immédiatement.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <div className="flex flex-col gap-4">
+            <form
+              ref={formRef}
+              action={handleCreate}
+              className="flex flex-wrap items-end gap-3 rounded-lg border p-3"
+            >
+              <Field className="w-40 gap-1.5">
+                <FieldLabel htmlFor={`new-product-name-${catalog.id}`} className="text-xs">
+                  Nom
+                </FieldLabel>
+                <Input
+                  id={`new-product-name-${catalog.id}`}
+                  name="name"
+                  placeholder="Ex : T-shirt oversize"
+                  required
+                />
+              </Field>
+              <Field className="w-24 gap-1.5">
+                <FieldLabel htmlFor={`new-product-price-${catalog.id}`} className="text-xs">
+                  Prix (€)
+                </FieldLabel>
+                <Input
+                  id={`new-product-price-${catalog.id}`}
+                  name="price"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  required
+                />
+              </Field>
+              <Button type="submit" size="sm" disabled={isPending}>
+                <Plus />
+                Ajouter
+              </Button>
+            </form>
+
+            {products === null ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">Chargement…</p>
+            ) : products.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                Aucun produit pour l&apos;instant — ajoute-en un ci-dessus.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {products.map((product) => (
+                  <li key={product.id} className="list-none">
+                    <div className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-foreground">{product.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {(product.price_cents / 100).toFixed(2)} €
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={isPending}
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemove(product.id)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </DialogPanel>
+        <DialogFooter>
+          <DialogClose render={<Button variant="secondary">Fermer</Button>} />
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function EditCatalogDialog({
+  catalog,
   onChanged,
 }: {
   catalog: Catalog;
-  preparedProducts: PreparedProduct[];
   onChanged: (catalog: Catalog) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [selectedIds, setSelectedIds] = useState<Set<string> | null>(null);
-  const formRef = useRef<HTMLFormElement>(null);
-
-  const toggle = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev ?? []);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  // Charge la composition actuelle à l'ouverture plutôt qu'au chargement de
-  // la page (rarement consulté, ne vaut pas d'alourdir le fetch initial) —
-  // même pattern que "Reprendre un live précédent" dans la console live.
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next);
-    if (next && selectedIds === null) {
-      getProductCatalogItems(catalog.id).then((ids) => setSelectedIds(new Set(ids)));
-    }
-  };
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger render={<Button type="button" size="sm" variant="outline">Modifier</Button>} />
-      <PopoverContent align="end" className="w-96">
-        <PopoverTitle className="mb-3 text-sm">Modifier le catalogue</PopoverTitle>
-        <form
-          ref={formRef}
-          action={(formData) => {
-            for (const id of selectedIds ?? []) formData.append("product_ids", id);
-            setOpen(false);
-            startTransition(async () => {
-              await updateProductCatalog(catalog.id, formData);
-              const name = String(formData.get("name") ?? catalog.name).trim() || catalog.name;
-              const scheduledFor = String(formData.get("scheduled_for") ?? "").trim() || null;
-              onChanged({
-                ...catalog,
-                name,
-                scheduled_for: scheduledFor,
-                product_count: (selectedIds ?? new Set()).size,
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={<Button type="button" size="sm" variant="outline">Modifier</Button>} />
+      <DialogPopup>
+        <DialogHeader>
+          <DialogTitle>Modifier le catalogue</DialogTitle>
+        </DialogHeader>
+        <DialogPanel>
+          <form
+            id={`edit-catalog-form-${catalog.id}`}
+            action={(formData) => {
+              startTransition(async () => {
+                await updateProductCatalog(catalog.id, formData);
+                const name = String(formData.get("name") ?? catalog.name).trim() || catalog.name;
+                const scheduledFor = String(formData.get("scheduled_for") ?? "").trim() || null;
+                onChanged({ ...catalog, name, scheduled_for: scheduledFor });
+                setOpen(false);
               });
-            });
-          }}
-          className="flex flex-col gap-3"
-        >
-          <Field className="gap-1.5">
-            <FieldLabel htmlFor={`edit-catalog-name-${catalog.id}`} className="text-xs">
-              Nom
-            </FieldLabel>
-            <Input
-              id={`edit-catalog-name-${catalog.id}`}
-              name="name"
-              autoFocus
-              defaultValue={catalog.name}
-            />
-          </Field>
-          <Field className="gap-1.5">
-            <FieldLabel htmlFor={`edit-catalog-date-${catalog.id}`} className="text-xs">
-              Date prévue
-            </FieldLabel>
-            <Input
-              id={`edit-catalog-date-${catalog.id}`}
-              name="scheduled_for"
-              type="date"
-              nativeInput
-              defaultValue={catalog.scheduled_for ?? ""}
-            />
-          </Field>
-
-          <div className="flex flex-col gap-1.5">
-            <p className="text-xs font-medium text-muted-foreground">Produits inclus</p>
-            {selectedIds === null ? (
-              <p className="py-2 text-center text-sm text-muted-foreground">Chargement…</p>
-            ) : (
-              <div className="grid max-h-48 grid-cols-1 gap-1 overflow-y-auto rounded-lg border p-2">
-                {preparedProducts.map((product) => (
-                  <label
-                    key={product.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
-                  >
-                    <Checkbox
-                      checked={selectedIds.has(product.id)}
-                      onCheckedChange={() => toggle(product.id)}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-foreground">{product.name}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="mt-1 flex justify-end gap-2">
-            <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>
-              Annuler
-            </Button>
-            <Button type="submit" size="sm" disabled={isPending || selectedIds === null}>
-              Valider
-            </Button>
-          </div>
-        </form>
-      </PopoverContent>
-    </Popover>
+            }}
+            className="flex flex-col gap-4"
+          >
+            <Field className="gap-1.5">
+              <FieldLabel htmlFor={`edit-catalog-name-${catalog.id}`}>Nom</FieldLabel>
+              <Input
+                id={`edit-catalog-name-${catalog.id}`}
+                name="name"
+                autoFocus
+                defaultValue={catalog.name}
+              />
+            </Field>
+            <Field className="gap-1.5">
+              <FieldLabel htmlFor={`edit-catalog-date-${catalog.id}`}>Date prévue</FieldLabel>
+              <Input
+                id={`edit-catalog-date-${catalog.id}`}
+                name="scheduled_for"
+                type="date"
+                nativeInput
+                defaultValue={catalog.scheduled_for ?? ""}
+              />
+            </Field>
+          </form>
+        </DialogPanel>
+        <DialogFooter>
+          <DialogClose render={<Button variant="secondary">Annuler</Button>} />
+          <Button type="submit" form={`edit-catalog-form-${catalog.id}`} disabled={isPending}>
+            Valider
+          </Button>
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
   );
 }
 
@@ -507,8 +561,8 @@ function DeleteCatalogButton({
         <AlertDialogHeader>
           <AlertDialogTitle>Supprimer ce catalogue ?</AlertDialogTitle>
           <AlertDialogDescription>
-            Les produits préparés qu&apos;il contient ne sont pas supprimés, seul ce regroupement
-            disparaît. Cette action est irréversible.
+            Les produits qu&apos;il contient ne sont pas supprimés, seul ce regroupement disparaît.
+            Cette action est irréversible.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
