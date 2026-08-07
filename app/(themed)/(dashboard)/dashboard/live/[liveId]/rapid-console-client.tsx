@@ -1257,6 +1257,19 @@ function CatalogProductsPanel({
       .finally(() => setIsLoadingPrevious(false));
   };
 
+  // Recharge catalogProducts (id, liveProduct/retired_at, internal_ref) —
+  // startTransition (runAction du parent) rafraîchit déjà "Produits actifs"
+  // côté À la volée après une action, mais catalogProducts est un state
+  // séparé qu'il ne touche jamais : sans ce rappel explicite, une carte
+  // catalogue restait figée sur son ancien état (toujours "Mettre à
+  // l'antenne"/"Retirer" affiché) même quand l'action avait bien réussi.
+  const refreshCatalog = async (catalogId: string) => {
+    const refreshed = await getCatalogProducts(liveId, catalogId);
+    setCatalogProducts(
+      refreshed.map((p) => ({ ...p, discount_tiers_cents: parseDiscountTiers(p.discount_tiers_cents) }))
+    );
+  };
+
   const handleSelectCatalog = async (catalogId: string) => {
     setSelectedCatalogId(catalogId);
     setCatalogProducts([]);
@@ -1273,16 +1286,12 @@ function CatalogProductsPanel({
     // la sélection, s'il ne l'est pas déjà pour ce live — cohérent avec
     // "démarrer le live avec au moins un article visible" sans exiger un
     // clic supplémentaire. Les suivants restent inactifs jusqu'à un clic
-    // explicite "Mettre à l'antenne". startTransition (runAction du parent)
-    // rafraîchit "Produits actifs" côté À la volée après la matérialisation.
+    // explicite "Mettre à l'antenne".
     const first = parsed[0];
     if (first && !first.liveProduct) {
       startTransition(async () => {
         await materializeFromPrepared(liveId, first.id);
-        const refreshed = await getCatalogProducts(liveId, catalogId);
-        setCatalogProducts(
-          refreshed.map((p) => ({ ...p, discount_tiers_cents: parseDiscountTiers(p.discount_tiers_cents) }))
-        );
+        await refreshCatalog(catalogId);
       });
     } else {
       setCatalogProducts(parsed);
@@ -1338,7 +1347,12 @@ function CatalogProductsPanel({
                       setDragQuantities((prev) => ({ ...prev, [`catalog:${product.id}`]: value }))
                     }
                     isPending={isPending}
-                    startTransition={startTransition}
+                    startTransition={(callback) =>
+                      startTransition(async () => {
+                        await callback();
+                        await refreshCatalog(selectedCatalogId);
+                      })
+                    }
                     onProductChanged={(updated) =>
                       setCatalogProducts(
                         catalogProducts.map((p) =>
