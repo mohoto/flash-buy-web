@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState, useTransition } from "react";
 import { ChevronLeft, ChevronRight, Trash2, Plus } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTab } from "@/components/ui/tabs";
@@ -202,19 +202,18 @@ export function ProductCatalogsList({ initialCatalogs }: { initialCatalogs: Cata
           </EmptyHeader>
         </Empty>
       ) : (
-        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-col gap-2">
           {filteredCatalogs.map((catalog) => (
-            <li key={catalog.id} className="list-none">
-              <CatalogCard
-                catalog={catalog}
-                onChanged={(updated) =>
-                  setCatalogs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
-                }
-                onDeleted={(id) => setCatalogs((prev) => prev.filter((c) => c.id !== id))}
-              />
-            </li>
+            <CatalogCard
+              key={catalog.id}
+              catalog={catalog}
+              onChanged={(updated) =>
+                setCatalogs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+              }
+              onDeleted={(id) => setCatalogs((prev) => prev.filter((c) => c.id !== id))}
+            />
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
@@ -285,6 +284,11 @@ function formatScheduledFor(scheduledFor: string | null): string {
   });
 }
 
+// Une carte pleine largeur par catalogue, empilées verticalement — même
+// gabarit que LivesList (lives-list.tsx) : infos à gauche, badge + actions à
+// droite. Pas de <Link> englobant toute la carte (contrairement à
+// LivesList) : plusieurs actions indépendantes (Gérer les produits,
+// Modifier, Supprimer) doivent rester cliquables séparément.
 function CatalogCard({
   catalog,
   onChanged,
@@ -298,17 +302,18 @@ function CatalogCard({
 
   return (
     <Card>
-      <CardContent className="flex flex-col gap-2 p-4">
-        <div className="min-w-0">
-          <p className="truncate text-base font-medium text-foreground">{catalog.name}</p>
-          <p className="text-sm text-muted-foreground">{formatScheduledFor(catalog.scheduled_for)}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-foreground">{catalog.name}</p>
+            <p className="text-xs text-muted-foreground">{formatScheduledFor(catalog.scheduled_for)}</p>
+          </div>
+          <Badge variant="secondary" size="sm" className="shrink-0">
+            {catalog.product_count} produit{catalog.product_count > 1 ? "s" : ""}
+          </Badge>
         </div>
 
-        <Badge variant="secondary" size="sm" className="w-fit">
-          {catalog.product_count} produit{catalog.product_count > 1 ? "s" : ""}
-        </Badge>
-
-        <div className="mt-2 flex flex-wrap items-center justify-end gap-2 border-t pt-3">
+        <div className="flex shrink-0 items-center gap-2">
           <ManageCatalogProductsDialog
             catalog={catalog}
             onProductCountChanged={(count) => onChanged({ ...catalog, product_count: count })}
@@ -324,7 +329,7 @@ function CatalogCard({
             }
           />
         </div>
-      </CardContent>
+      </div>
     </Card>
   );
 }
