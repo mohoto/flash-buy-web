@@ -223,13 +223,49 @@ export function ProductCatalogsList({ initialCatalogs }: { initialCatalogs: Cata
 // ensuite, une fois le catalogue créé, via ManageCatalogProductsDialog (le
 // catalogue doit exister avant de pouvoir lui rattacher des
 // prepared_products, cf. product_catalog_items.catalog_id).
+// "15 août" (sans année) pour rester court dans le nom auto-généré — cf.
+// formatScheduledFor plus bas, qui affiche lui la date complète avec année
+// sur les cartes déjà créées.
+function formatDateForName(dateStr: string): string {
+  return new Date(`${dateStr}T00:00:00`).toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "long",
+  });
+}
+
 function CreateCatalogDialog({ onCreated }: { onCreated: (catalog: Catalog) => void }) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
+  const [scheduledFor, setScheduledFor] = useState("");
+  // Le nom suit automatiquement la date tant que le vendeur n'y a pas touché
+  // lui-même — dès qu'il édite le champ nom à la main, on arrête de
+  // l'écraser à chaque changement de date.
+  const [name, setName] = useState("");
+  const [nameEditedManually, setNameEditedManually] = useState(false);
+
+  const handleScheduledForChange = (value: string) => {
+    setScheduledFor(value);
+    if (!nameEditedManually) {
+      setName(value ? `Live du ${formatDateForName(value)}` : "");
+    }
+  };
+
+  const resetForm = () => {
+    formRef.current?.reset();
+    setScheduledFor("");
+    setName("");
+    setNameEditedManually(false);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) resetForm();
+      }}
+    >
       <DialogTrigger render={<Button type="button"><Plus />Créer un catalogue</Button>} />
       <DialogPopup>
         <DialogHeader>
@@ -248,19 +284,37 @@ function CreateCatalogDialog({ onCreated }: { onCreated: (catalog: Catalog) => v
                 if (created) {
                   onCreated(created);
                   setOpen(false);
-                  formRef.current?.reset();
+                  resetForm();
                 }
               });
             }}
             className="flex flex-col gap-4"
           >
             <Field className="gap-1.5">
-              <FieldLabel htmlFor="catalog-name">Nom du catalogue</FieldLabel>
-              <Input id="catalog-name" name="name" placeholder="Ex : Catalogue du 15 août" autoFocus required />
+              <FieldLabel htmlFor="catalog-scheduled-for">Date prévue</FieldLabel>
+              <Input
+                id="catalog-scheduled-for"
+                name="scheduled_for"
+                type="date"
+                nativeInput
+                autoFocus
+                value={scheduledFor}
+                onChange={(e) => handleScheduledForChange(e.target.value)}
+              />
             </Field>
             <Field className="gap-1.5">
-              <FieldLabel htmlFor="catalog-scheduled-for">Date prévue</FieldLabel>
-              <Input id="catalog-scheduled-for" name="scheduled_for" type="date" nativeInput />
+              <FieldLabel htmlFor="catalog-name">Nom du catalogue</FieldLabel>
+              <Input
+                id="catalog-name"
+                name="name"
+                placeholder="Ex : Catalogue du 15 août"
+                required
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setNameEditedManually(true);
+                }}
+              />
             </Field>
           </form>
         </DialogPanel>
