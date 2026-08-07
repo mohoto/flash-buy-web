@@ -57,6 +57,16 @@ import {
   getPreviousLiveProducts,
   getCatalogProducts,
 } from "./rapid-actions";
+// Actions du catalogue préparé (prepared_products, cf.
+// /dashboard/produits-prepares) — un produit "catalog:" pas encore
+// matérialisé n'est pas un live_products, donc Modifier/Remises sur sa
+// carte (CatalogProductCard) doivent modifier le prepared_product
+// directement, pas via updateRapidProductPrice/DiscountTiers (réservées aux
+// live_products déjà matérialisés).
+import {
+  updatePreparedProductPrice,
+  updatePreparedProductDiscountTiers,
+} from "../../produits-prepares/actions";
 
 type LiveProduct = {
   id: string;
@@ -609,6 +619,7 @@ export function RapidConsoleClient({
               </>
             ) : (
               <CatalogProductsPanel
+                liveId={liveId}
                 catalogSearch={catalogSearch}
                 previousLives={previousLives}
                 previousLiveProducts={previousLiveProducts}
@@ -617,6 +628,8 @@ export function RapidConsoleClient({
                 catalogProducts={catalogProducts}
                 setCatalogProducts={setCatalogProducts}
                 countByProduct={countByProduct}
+                isPending={isPending}
+                startTransition={runAction}
                 dragQuantities={dragQuantities}
                 setDragQuantities={setDragQuantities}
               />
@@ -1179,6 +1192,7 @@ function ActiveAndPreviousProducts({
 // lieu (contrairement à "À la volée", ces produits n'existent pas encore
 // dans live_products pour CE live).
 function CatalogProductsPanel({
+  liveId,
   catalogSearch,
   previousLives,
   previousLiveProducts,
@@ -1187,9 +1201,12 @@ function CatalogProductsPanel({
   catalogProducts,
   setCatalogProducts,
   countByProduct,
+  isPending,
+  startTransition,
   dragQuantities,
   setDragQuantities,
 }: {
+  liveId: string;
   catalogSearch: string;
   previousLives: PreviousLive[];
   previousLiveProducts: PreparedProduct[];
@@ -1197,6 +1214,8 @@ function CatalogProductsPanel({
   productCatalogs: ProductCatalog[];
   catalogProducts: PreparedProduct[];
   setCatalogProducts: (products: PreparedProduct[]) => void;
+  isPending: boolean;
+  startTransition: (callback: () => void) => void;
   countByProduct: Map<string, number>;
   dragQuantities: Record<string, number>;
   setDragQuantities: (updater: (prev: Record<string, number>) => Record<string, number>) => void;
@@ -1287,6 +1306,17 @@ function CatalogProductsPanel({
                     onQuantityChange={(value) =>
                       setDragQuantities((prev) => ({ ...prev, [`catalog:${product.id}`]: value }))
                     }
+                    isPending={isPending}
+                    onActivate={() =>
+                      startTransition(async () => {
+                        await materializeFromPrepared(liveId, product.id);
+                      })
+                    }
+                    onProductChanged={(updated) =>
+                      setCatalogProducts(
+                        catalogProducts.map((p) => (p.id === updated.id ? updated : p))
+                      )
+                    }
                   />
                 </DraggableProductCard>
               </li>
@@ -1350,16 +1380,32 @@ function CatalogProductsPanel({
 // Carte glissable commune aux deux sources catalogue (produits préparés /
 // produits d'un live précédent) — même style que les cartes "à la volée"
 // mais sans badge internal_ref (n'existe pas tant que non matérialisé).
+//
+// isPending/onActivate/onProductChanged sont optionnelles : seule la source
+// "catalog:" (prepared_products, cf. CatalogProductsPanel) les fournit —
+// "Mettre à l'antenne" matérialise le produit (déjà actif par défaut dès sa
+// création, cf. create_live_product_from_prepared/retired_at nullable) sans
+// passer par une intention d'achat, et Modifier/Remises éditent le
+// prepared_product directement puisqu'aucun live_products n'existe encore
+// pour lui. La source "previous:" (produits d'un live précédent, déjà
+// d'anciens live_products) n'a pas de prepared_product sous-jacent à éditer
+// ici, et n'affiche donc aucun de ces boutons.
 function CatalogProductCard({
   product,
   count,
   quantity,
   onQuantityChange,
+  isPending,
+  onActivate,
+  onProductChanged,
 }: {
   product: PreparedProduct;
   count: number;
   quantity: number;
   onQuantityChange: (value: number) => void;
+  isPending?: boolean;
+  onActivate?: () => void;
+  onProductChanged?: (product: PreparedProduct) => void;
 }) {
   return (
     <Card>
@@ -1377,8 +1423,233 @@ function CatalogProductCard({
             <QuantityStepper value={quantity} onChange={onQuantityChange} />
           </div>
         </div>
+        {onActivate && onProductChanged && (
+          <div className="mt-4 flex items-center justify-end gap-2 border-t pt-3">
+            <EditablePreparedProductPrice product={product} onChanged={onProductChanged} />
+            <EditablePreparedProductDiscountTiers product={product} onChanged={onProductChanged} />
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={isPending}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={onActivate}
+            >
+              Mettre à l&apos;antenne
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+// Même configuration Modifier/Remises que EditablePrice/EditableDiscountTiers
+// (produits "à la volée" ci-dessus), mais branchée sur
+// updatePreparedProductPrice/DiscountTiers (produits-prepares/actions.ts) —
+// le produit d'une carte "catalog:" est un prepared_product, pas encore un
+// live_products tant qu'il n'a pas été matérialisé (glissé, ou "Mettre à
+// l'antenne").
+function EditablePreparedProductPrice({
+  product,
+  onChanged,
+}: {
+  product: PreparedProduct;
+  onChanged: (product: PreparedProduct) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onPointerDown={(e) => e.stopPropagation()}
+            className="shrink-0"
+          >
+            Modifier
+          </Button>
+        }
+      />
+      <PopoverContent align="end" className="w-56" onPointerDown={(e) => e.stopPropagation()}>
+        <PopoverTitle className="mb-3 text-sm">Modifier le produit</PopoverTitle>
+        <form
+          action={(formData) => {
+            const price = Number(formData.get("price") ?? 0);
+            const name = String(formData.get("name") ?? "");
+            setOpen(false);
+            if (Number.isFinite(price) && price > 0) {
+              updatePreparedProductPrice(product.id, formData);
+              onChanged({
+                ...product,
+                name: name.trim() || product.name,
+                price_cents: Math.round(price * 100),
+              });
+            }
+          }}
+          className="flex flex-col gap-3"
+        >
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor={`prepared-name-${product.id}`} className="text-xs">
+              Nom
+            </FieldLabel>
+            <Input
+              key={`${product.id}-${product.name}`}
+              id={`prepared-name-${product.id}`}
+              name="name"
+              autoFocus
+              defaultValue={product.name}
+            />
+          </Field>
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor={`prepared-price-${product.id}`} className="text-xs">
+              Prix (€)
+            </FieldLabel>
+            <Input
+              key={`${product.id}-${product.price_cents}`}
+              id={`prepared-price-${product.id}`}
+              name="price"
+              type="number"
+              min={0}
+              step="0.01"
+              required
+              defaultValue={(product.price_cents / 100).toFixed(2)}
+            />
+          </Field>
+          <div className="mt-1 flex justify-end gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>
+              Annuler
+            </Button>
+            <Button type="submit" size="sm">
+              Valider
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function EditablePreparedProductDiscountTiers({
+  product,
+  onChanged,
+}: {
+  product: PreparedProduct;
+  onChanged: (product: PreparedProduct) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const resetAllToZero = () => {
+    formRef.current?.querySelectorAll<HTMLInputElement>('input[type="number"]').forEach((input) => {
+      input.value = "";
+    });
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onPointerDown={(e) => e.stopPropagation()}
+            className="shrink-0"
+          >
+            Remises
+          </Button>
+        }
+      />
+      <PopoverContent align="end" className="w-96" onPointerDown={(e) => e.stopPropagation()}>
+        <PopoverTitle className="mb-3 text-sm">Remises par quantité</PopoverTitle>
+        <form
+          ref={formRef}
+          action={(formData) => {
+            setOpen(false);
+            updatePreparedProductDiscountTiers(product.id, formData);
+
+            const tiers: Record<string, number> = {};
+            for (let qty = 1; qty <= 8; qty++) {
+              const raw = formData.get(`discount_${qty}`);
+              const euros = raw === null || raw === "" ? null : Number(raw);
+              if (euros !== null && Number.isFinite(euros) && euros > 0) {
+                tiers[String(qty)] = Math.round(euros * 100);
+              }
+            }
+            const rawSimple = formData.get("discount_simple");
+            const simpleEuros = rawSimple === null || rawSimple === "" ? null : Number(rawSimple);
+            const simpleDiscountCents =
+              simpleEuros !== null && Number.isFinite(simpleEuros) && simpleEuros > 0
+                ? Math.round(simpleEuros * 100)
+                : 0;
+            onChanged({ ...product, discount_tiers_cents: tiers, simple_discount_cents: simpleDiscountCents });
+          }}
+          className="flex flex-col gap-2"
+        >
+          <Field className="gap-1">
+            <FieldLabel htmlFor={`prepared-discount-simple-${product.id}`} className="text-xs">
+              Remise simple (€)
+            </FieldLabel>
+            <Input
+              id={`prepared-discount-simple-${product.id}`}
+              name="discount_simple"
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder="0.00"
+              defaultValue={
+                product.simple_discount_cents ? (product.simple_discount_cents / 100).toFixed(2) : ""
+              }
+            />
+          </Field>
+
+          <Separator className="my-1" />
+
+          <p className="text-xs text-muted-foreground">
+            Remises par quantité exacte (prioritaires sur la remise simple)
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {Array.from({ length: 8 }, (_, i) => i + 1).map((qty) => (
+              <Field key={qty} className="gap-1">
+                <FieldLabel htmlFor={`prepared-discount-${product.id}-${qty}`} className="text-xs">
+                  {qty}×
+                </FieldLabel>
+                <Input
+                  id={`prepared-discount-${product.id}-${qty}`}
+                  name={`discount_${qty}`}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="0.00"
+                  defaultValue={
+                    product.discount_tiers_cents[String(qty)]
+                      ? (product.discount_tiers_cents[String(qty)] / 100).toFixed(2)
+                      : ""
+                  }
+                />
+              </Field>
+            ))}
+          </div>
+
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={resetAllToZero}>
+              Réinitialiser à 0
+            </Button>
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>
+                Annuler
+              </Button>
+              <Button type="submit" size="sm" variant="success">
+                Valider
+              </Button>
+            </div>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
   );
 }
 
