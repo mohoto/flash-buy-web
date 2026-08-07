@@ -161,7 +161,7 @@ export function ConnectionStatusBadge() {
   const status = useConnectionStatus();
 
   if (!status.workerActive) {
-    return <StatusBadge variant="warning">Aucun worker connecté</StatusBadge>;
+    return <StatusBadge variant="warning">Live déconnecté</StatusBadge>;
   }
   if (status.eulerStatus === "failing") {
     return <StatusBadge variant="destructive">Connexion TikTok en échec</StatusBadge>;
