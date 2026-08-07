@@ -54,8 +54,6 @@ import {
   unassignRapidItem,
   deleteRapidItem,
   materializeFromPrepared,
-  materializeFromPreviousLive,
-  getPreviousLiveProducts,
   getCatalogProducts,
 } from "./rapid-actions";
 // Actions du catalogue préparé (prepared_products, cf.
@@ -101,15 +99,9 @@ type CatalogProduct = PreparedProduct & {
   liveProduct: { id: string; retired_at: string | null; internal_ref: string } | null;
 };
 
-type PreviousLive = {
-  id: string;
-  started_at: string | null;
-};
-
 // Catalogue préparé à l'avance (product_catalogs, cf.
 // /dashboard/produits-prepares) — un regroupement nommé de PreparedProduct,
-// choisi dans l'onglet Catalogue au même titre que "Reprendre un live
-// précédent" (cf. CatalogProductsPanel).
+// choisi dans l'onglet Catalogue (cf. CatalogProductsPanel).
 type ProductCatalog = {
   id: string;
   name: string;
@@ -223,7 +215,6 @@ export function RapidConsoleClient({
   initialItemProducts,
   initialOrders,
   initialOrderItemDates,
-  previousLives,
   productCatalogs,
   shopSettings,
 }: {
@@ -233,7 +224,6 @@ export function RapidConsoleClient({
   initialItemProducts: RapidItemProduct[];
   initialOrders: Order[];
   initialOrderItemDates: OrderItemDate[];
-  previousLives: PreviousLive[];
   productCatalogs: ProductCatalog[];
   shopSettings: ShopSettings;
 }) {
@@ -241,20 +231,16 @@ export function RapidConsoleClient({
     initialProducts.map((p) => ({ ...p, discount_tiers_cents: parseDiscountTiers(p.discount_tiers_cents) }))
   );
   // "À la volée" (comportement historique) vs "Catalogue" (produits repris
-  // d'un catalogue préparé ou d'un live précédent, cf. CatalogProductsPanel)
-  // — bascule purement locale, ne change rien côté serveur tant qu'aucun
-  // produit catalogue n'est glissé.
+  // d'un catalogue préparé, cf. CatalogProductsPanel) — bascule purement
+  // locale, ne change rien côté serveur tant qu'aucun produit catalogue
+  // n'est glissé.
   const [productSource, setProductSource] = useState<"onthefly" | "catalog">("onthefly");
-  // Produits du live précédent sélectionné dans CatalogProductsPanel,
-  // chargés à la demande (cf. getPreviousLiveProducts) — gardés ici (pas
-  // dans le panel) pour que handleDragEnd puisse résoudre le prix d'un
-  // produit "previous:" glissé (ex. calcul du plafond unpaidOrderRestriction).
-  const [previousLiveProducts, setPreviousLiveProducts] = useState<PreparedProduct[]>([]);
-  // Même principe pour le catalogue préparé sélectionné (cf.
-  // getCatalogProducts) — un item de catalogue référence un prepared_product,
-  // matérialisé via materializeFromPrepared comme n'importe quel produit
-  // préparé (préfixe "catalog:" seulement pour que
-  // handleDragStart/performAssign sachent chercher dans catalogProducts).
+  // Produits du catalogue préparé sélectionné dans CatalogProductsPanel,
+  // chargés à la demande (cf. getCatalogProducts) — gardés ici (pas dans le
+  // panel) pour que handleDragEnd puisse résoudre le prix d'un produit
+  // "catalog:" glissé (ex. calcul du plafond unpaidOrderRestriction).
+  // Matérialisé via materializeFromPrepared comme n'importe quel produit
+  // préparé.
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [items, setItems] = useState(initialItems);
   const [itemProducts, setItemProducts] = useState(initialItemProducts);
@@ -400,11 +386,6 @@ export function RapidConsoleClient({
 
   function handleDragStart(event: DragStartEvent) {
     const id = event.active.id as string;
-    if (id.startsWith("previous:")) {
-      const previousId = id.slice("previous:".length);
-      setDraggedProduct(previousLiveProducts.find((p) => p.id === previousId) ?? null);
-      return;
-    }
     if (id.startsWith("catalog:")) {
       const catalogProductId = id.slice("catalog:".length);
       setDraggedProduct(catalogProducts.find((p) => p.id === catalogProductId) ?? null);
@@ -461,26 +442,16 @@ export function RapidConsoleClient({
 
   // Assignation effective, factorisée pour être appelée directement (aucun
   // blocage) ou après confirmation du vendeur dans PendingOrderAlertDialog.
-  // productId peut porter un préfixe "previous:"/"catalog:" (cartes de
-  // l'onglet Catalogue, cf. CatalogProductsPanel) — matérialise d'abord en
-  // live_products via la RPC correspondante, puis assigne normalement. Une
+  // productId peut porter un préfixe "catalog:" (cartes de l'onglet
+  // Catalogue, cf. CatalogProductsPanel) — matérialise d'abord en
+  // live_products via materializeFromPrepared, puis assigne normalement. Une
   // carte "à la volée" (déjà un live_products de CE live) n'a pas de préfixe
-  // et saute directement à assignRapidItemToProduct comme avant. "catalog:"
-  // réutilise materializeFromPrepared : un item de catalogue référence
-  // toujours un prepared_product_id, sa matérialisation ne dépend jamais de
-  // son appartenance à un catalogue.
+  // et saute directement à assignRapidItemToProduct comme avant.
   const performAssign = useCallback(
     (itemId: string, rawProductId: string, quantity: number) => {
       runAction(async () => {
         let productId = rawProductId;
-        if (rawProductId.startsWith("previous:")) {
-          const materialized = await materializeFromPreviousLive(
-            liveId,
-            rawProductId.slice("previous:".length)
-          );
-          if (!materialized) return;
-          productId = materialized.id;
-        } else if (rawProductId.startsWith("catalog:")) {
+        if (rawProductId.startsWith("catalog:")) {
           const materialized = await materializeFromPrepared(liveId, rawProductId.slice("catalog:".length));
           if (!materialized) return;
           productId = materialized.id;
@@ -492,22 +463,18 @@ export function RapidConsoleClient({
     [liveId, runAction]
   );
 
-  // Résout le prix d'un productId potentiellement préfixé
-  // ("previous:"/"catalog:") — sert au calcul du plafond
-  // unpaidOrderRestriction dans handleDragEnd, avant toute matérialisation.
+  // Résout le prix d'un productId potentiellement préfixé ("catalog:") —
+  // sert au calcul du plafond unpaidOrderRestriction dans handleDragEnd,
+  // avant toute matérialisation.
   const resolveProductPriceCents = useCallback(
     (productId: string): number => {
-      if (productId.startsWith("previous:")) {
-        const id = productId.slice("previous:".length);
-        return previousLiveProducts.find((p) => p.id === id)?.price_cents ?? 0;
-      }
       if (productId.startsWith("catalog:")) {
         const id = productId.slice("catalog:".length);
         return catalogProducts.find((p) => p.id === id)?.price_cents ?? 0;
       }
       return products.find((p) => p.id === productId)?.price_cents ?? 0;
     },
-    [previousLiveProducts, catalogProducts, products]
+    [catalogProducts, products]
   );
 
   function handleDragEnd(event: DragEndEvent) {
@@ -633,9 +600,6 @@ export function RapidConsoleClient({
               <CatalogProductsPanel
                 liveId={liveId}
                 catalogSearch={catalogSearch}
-                previousLives={previousLives}
-                previousLiveProducts={previousLiveProducts}
-                setPreviousLiveProducts={setPreviousLiveProducts}
                 productCatalogs={productCatalogs}
                 catalogProducts={catalogProducts}
                 setCatalogProducts={setCatalogProducts}
@@ -1197,18 +1161,15 @@ function ActiveAndPreviousProducts({
   );
 }
 
-// Onglet "Catalogue" : deux sources de cartes glissables, préfixées
-// ("previous:"/"catalog:") pour que performAssign (RapidConsoleClient)
-// sache quelle RPC de matérialisation appeler avant assignRapidItemToProduct
-// — glisser une de ces cartes ne modifie rien tant que le drop n'a pas eu
-// lieu (contrairement à "À la volée", ces produits n'existent pas encore
-// dans live_products pour CE live).
+// Onglet "Catalogue" : cartes glissables préfixées ("catalog:") pour que
+// performAssign (RapidConsoleClient) sache quelle RPC de matérialisation
+// appeler avant assignRapidItemToProduct — glisser une de ces cartes ne
+// modifie rien tant que le drop n'a pas eu lieu (contrairement à "À la
+// volée", ces produits n'existent pas encore dans live_products pour CE
+// live).
 function CatalogProductsPanel({
   liveId,
   catalogSearch,
-  previousLives,
-  previousLiveProducts,
-  setPreviousLiveProducts,
   productCatalogs,
   catalogProducts,
   setCatalogProducts,
@@ -1220,9 +1181,6 @@ function CatalogProductsPanel({
 }: {
   liveId: string;
   catalogSearch: string;
-  previousLives: PreviousLive[];
-  previousLiveProducts: PreparedProduct[];
-  setPreviousLiveProducts: (products: PreparedProduct[]) => void;
   productCatalogs: ProductCatalog[];
   catalogProducts: CatalogProduct[];
   setCatalogProducts: (products: CatalogProduct[]) => void;
@@ -1232,15 +1190,10 @@ function CatalogProductsPanel({
   dragQuantities: Record<string, number>;
   setDragQuantities: (updater: (prev: Record<string, number>) => Record<string, number>) => void;
 }) {
-  const [selectedPreviousLiveId, setSelectedPreviousLiveId] = useState("");
-  const [isLoadingPrevious, setIsLoadingPrevious] = useState(false);
   const [selectedCatalogId, setSelectedCatalogId] = useState("");
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
 
   const normalizedSearch = catalogSearch.trim().toLowerCase();
-  const filteredPrevious = normalizedSearch
-    ? previousLiveProducts.filter((p) => p.name.toLowerCase().includes(normalizedSearch))
-    : previousLiveProducts;
   // Les produits déjà à l'antenne remontent en haut de la pile — sinon un
   // catalogue avec beaucoup de produits oblige à faire défiler pour
   // retrouver celui qu'on vient d'activer. Tri stable : l'ordre relatif
@@ -1254,20 +1207,6 @@ function CatalogProductsPanel({
   const filteredCatalogProducts = normalizedSearch
     ? sortedCatalogProducts.filter((p) => p.name.toLowerCase().includes(normalizedSearch))
     : sortedCatalogProducts;
-
-  const handleSelectPreviousLive = (liveId: string) => {
-    setSelectedPreviousLiveId(liveId);
-    setPreviousLiveProducts([]);
-    if (!liveId) return;
-    setIsLoadingPrevious(true);
-    getPreviousLiveProducts(liveId)
-      .then((products) =>
-        setPreviousLiveProducts(
-          products.map((p) => ({ ...p, discount_tiers_cents: parseDiscountTiers(p.discount_tiers_cents) }))
-        )
-      )
-      .finally(() => setIsLoadingPrevious(false));
-  };
 
   // Recharge catalogProducts (id, liveProduct/retired_at, internal_ref) —
   // startTransition (runAction du parent) rafraîchit déjà "Produits actifs"
@@ -1382,94 +1321,7 @@ function CatalogProductsPanel({
           </ul>
         )}
       </div>
-
-      <Separator />
-
-      <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">Reprendre un live précédent</h3>
-        <Select value={selectedPreviousLiveId} onValueChange={(v) => handleSelectPreviousLive(v as string)}>
-          <SelectTrigger>
-            <SelectValue placeholder="Choisir un live…" />
-          </SelectTrigger>
-          <SelectContent>
-            {previousLives.map((live) => (
-              <SelectItem key={live.id} value={live.id}>
-                {live.started_at
-                  ? new Date(live.started_at).toLocaleDateString("fr-FR", {
-                      day: "numeric",
-                      month: "long",
-                      year: "numeric",
-                    })
-                  : live.id}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {isLoadingPrevious ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">Chargement…</p>
-        ) : selectedPreviousLiveId && filteredPrevious.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">
-            Aucun produit sur ce live.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-3">
-            {filteredPrevious.map((product) => (
-              <li key={product.id} className="list-none">
-                <DraggableProductCard id={`previous:${product.id}`}>
-                  <CatalogProductCard
-                    product={product}
-                    count={countByProduct.get(product.id) ?? 0}
-                    quantity={dragQuantities[`previous:${product.id}`] ?? 1}
-                    onQuantityChange={(value) =>
-                      setDragQuantities((prev) => ({ ...prev, [`previous:${product.id}`]: value }))
-                    }
-                  />
-                </DraggableProductCard>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
     </div>
-  );
-}
-
-// Carte glissable pour "previous:" (produits d'un live précédent, déjà
-// d'anciens live_products) — même style que les cartes "à la volée" mais
-// sans badge internal_ref (n'existe pas tant que non re-matérialisé pour CE
-// live). Pas de Modifier/Remises/Mettre à l'antenne ici : il n'y a pas de
-// prepared_product sous-jacent à éditer, contrairement aux produits d'un
-// catalogue préparé (cf. CatalogPreparedProductCard ci-dessous).
-function CatalogProductCard({
-  product,
-  count,
-  quantity,
-  onQuantityChange,
-}: {
-  product: PreparedProduct;
-  count: number;
-  quantity: number;
-  onQuantityChange: (value: number) => void;
-}) {
-  return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <p className="truncate text-base font-medium text-foreground">{product.name}</p>
-            <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <p className="text-sm text-muted-foreground">{(product.price_cents / 100).toFixed(2)} €</p>
-              <DiscountSummary product={product} />
-            </div>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-3">
-            <span className="text-sm tabular-nums text-muted-foreground">{count} preneurs</span>
-            <QuantityStepper value={quantity} onChange={onQuantityChange} />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 

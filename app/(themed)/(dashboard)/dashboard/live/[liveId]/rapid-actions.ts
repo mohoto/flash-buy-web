@@ -437,51 +437,6 @@ export async function materializeFromPrepared(
   return data;
 }
 
-// Même principe que materializeFromPrepared, mais la source est un
-// live_products d'un live précédent du même shop plutôt qu'un produit de la
-// bibliothèque préparée — "reprendre les produits d'un live précédent"
-// directement depuis l'onglet Catalogue.
-export async function materializeFromPreviousLive(
-  liveId: string,
-  sourceLiveProductId: string
-): Promise<{ id: string } | null> {
-  const shop = await getOwnShop();
-  const supabase = await createClient();
-
-  const { data, error } = await supabase
-    .rpc("create_live_product_from_previous", {
-      p_live_id: liveId,
-      p_shop_id: shop.id,
-      p_source_live_product_id: sourceLiveProductId,
-    })
-    .select("id")
-    .single();
-
-  if (error) {
-    console.error("materializeFromPreviousLive failed", error);
-    return null;
-  }
-  return data;
-}
-
-// Liste des live_products d'un live précédent (même shop) — appelée au
-// changement de sélection dans le <Select> "Reprendre les produits d'un
-// live précédent" de l'onglet Catalogue, plutôt qu'au chargement de la page
-// (rarement consulté, ne vaut pas d'alourdir le fetch initial).
-export async function getPreviousLiveProducts(sourceLiveId: string) {
-  const shop = await getOwnShop();
-  const supabase = await createClient();
-
-  const { data } = await supabase
-    .from("live_products")
-    .select("id, name, price_cents, discount_tiers_cents, simple_discount_cents")
-    .eq("live_id", sourceLiveId)
-    .eq("shop_id", shop.id)
-    .order("created_at", { ascending: true });
-
-  return data ?? [];
-}
-
 // Catalogues préparés à l'avance (product_catalogs, cf.
 // /dashboard/produits-prepares) — chargés au rendu initial de la console
 // (peu nombreux en pratique, contrairement aux produits qu'ils contiennent)
@@ -506,15 +461,15 @@ export async function getProductCatalogs(): Promise<
 // Produits préparés (prepared_products) appartenant à UN catalogue donné,
 // avec pour chacun l'éventuel live_products déjà matérialisé pour CE live
 // précis (via source_prepared_product_id, cf. migration
-// live_products_source_prepared) — sert à CatalogProductCard pour basculer
-// entre son rendu "à l'antenne" (bordure cyan, Modifier/Remises/Retirer,
-// identique aux produits à la volée actifs) et son rendu simple ("Mettre à
-// l'antenne") selon que le produit a déjà été matérialisé pour ce live.
-// Appelée au changement de sélection dans le <Select> "Choisir un catalogue
-// préparé", même pattern que getPreviousLiveProducts. Matérialisés ensuite
-// via materializeFromPrepared (même RPC que la source "Produits préparés" :
-// un item de catalogue référence toujours un prepared_product_id, la
-// matérialisation ne dépend jamais de son appartenance à un catalogue).
+// live_products_source_prepared) — sert à CatalogPreparedProductCard pour
+// basculer entre son rendu "à l'antenne" (bordure cyan, Modifier/Remises/
+// Retirer, identique aux produits à la volée actifs) et son rendu simple
+// ("Mettre à l'antenne") selon que le produit a déjà été matérialisé pour ce
+// live. Appelée au changement de sélection dans le <Select> "Choisir un
+// catalogue préparé". Matérialisés ensuite via materializeFromPrepared (même
+// RPC que la source "Produits préparés" : un item de catalogue référence
+// toujours un prepared_product_id, la matérialisation ne dépend jamais de
+// son appartenance à un catalogue).
 export async function getCatalogProducts(liveId: string, catalogId: string) {
   const shop = await getOwnShop();
   const supabase = await createClient();

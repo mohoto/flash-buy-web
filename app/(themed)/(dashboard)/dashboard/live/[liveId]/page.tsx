@@ -79,20 +79,8 @@ export default async function LiveConsolePage({
     .select("id, live_rapid_item_id, live_product_id, quantity, discount_cents")
     .eq("shop_id", shop.id);
 
-  // Onglet "Catalogue" : liste des lives précédents du shop pour reprendre
-  // leurs produits.
-  const { data: previousLives } = await supabase
-    .from("lives")
-    .select("id, started_at")
-    .eq("shop_id", shop.id)
-    .eq("status", "ended")
-    .neq("id", liveId)
-    .order("started_at", { ascending: false })
-    .limit(20);
-
   // Catalogues préparés à l'avance (product_catalogs, cf.
-  // /dashboard/produits-prepares) — proposés dans l'onglet Catalogue au même
-  // titre que "Reprendre un live précédent".
+  // /dashboard/produits-prepares) — proposés dans l'onglet Catalogue.
   const { data: productCatalogs } = await supabase
     .from("product_catalogs")
     .select("id, name, scheduled_for")
@@ -182,7 +170,6 @@ export default async function LiveConsolePage({
             initialItemProducts={rapidItemProducts ?? []}
             initialOrders={orders ?? []}
             initialOrderItemDates={rapidOrderItemDates ?? []}
-            previousLives={previousLives ?? []}
             productCatalogs={productCatalogs ?? []}
             shopSettings={{
               pendingOrderExpiryMinutes: shop.pending_order_expiry_minutes,
