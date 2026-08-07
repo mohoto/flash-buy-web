@@ -327,15 +327,6 @@ function CreateCatalogDialog({ onCreated }: { onCreated: (catalog: Catalog) => v
   );
 }
 
-function formatScheduledFor(scheduledFor: string | null): string {
-  if (!scheduledFor) return "Aucune date prévue";
-  return new Date(`${scheduledFor}T00:00:00`).toLocaleDateString("fr-FR", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-}
-
 // Une carte pleine largeur par catalogue, empilées verticalement — même
 // gabarit que LivesList (lives-list.tsx) : infos à gauche, badge + actions à
 // droite. Pas de <Link> englobant toute la carte (contrairement à
@@ -356,10 +347,7 @@ function CatalogCard({
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-foreground">{catalog.name}</p>
-            <p className="text-xs text-muted-foreground">{formatScheduledFor(catalog.scheduled_for)}</p>
-          </div>
+          <p className="min-w-0 truncate text-sm font-medium text-foreground">{catalog.name}</p>
           <Badge variant="secondary" size="sm" className="shrink-0">
             {catalog.product_count} produit{catalog.product_count > 1 ? "s" : ""}
           </Badge>
