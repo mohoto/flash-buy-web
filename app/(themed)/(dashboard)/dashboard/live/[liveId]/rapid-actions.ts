@@ -444,3 +444,45 @@ export async function getPreviousLiveProducts(sourceLiveId: string) {
 
   return data ?? [];
 }
+
+// Catalogues préparés à l'avance (product_catalogs, cf.
+// /dashboard/produits-prepares) — chargés au rendu initial de la console
+// (peu nombreux en pratique, contrairement aux produits qu'ils contiennent)
+// pour peupler le <Select> "Choisir un catalogue préparé" de l'onglet
+// Catalogue.
+export async function getProductCatalogs(): Promise<
+  { id: string; name: string; scheduled_for: string | null }[]
+> {
+  const shop = await getOwnShop();
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("product_catalogs")
+    .select("id, name, scheduled_for")
+    .eq("shop_id", shop.id)
+    .order("scheduled_for", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false });
+
+  return data ?? [];
+}
+
+// Produits préparés (prepared_products) appartenant à UN catalogue donné —
+// appelée au changement de sélection dans le <Select> "Choisir un catalogue
+// préparé", même pattern que getPreviousLiveProducts. Matérialisés ensuite
+// via materializeFromPrepared (même RPC que la source "Produits préparés" :
+// un item de catalogue référence toujours un prepared_product_id, la
+// matérialisation ne dépend jamais de son appartenance à un catalogue).
+export async function getCatalogProducts(catalogId: string) {
+  const shop = await getOwnShop();
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("product_catalog_items")
+    .select(
+      "prepared_products!inner(id, name, price_cents, discount_tiers_cents, simple_discount_cents, shop_id)"
+    )
+    .eq("catalog_id", catalogId)
+    .eq("prepared_products.shop_id", shop.id);
+
+  return (data ?? []).map((row) => row.prepared_products);
+}

@@ -55,6 +55,7 @@ import {
   materializeFromPrepared,
   materializeFromPreviousLive,
   getPreviousLiveProducts,
+  getCatalogProducts,
 } from "./rapid-actions";
 
 type LiveProduct = {
@@ -81,6 +82,16 @@ type PreparedProduct = {
 type PreviousLive = {
   id: string;
   started_at: string | null;
+};
+
+// Catalogue préparé à l'avance (product_catalogs, cf.
+// /dashboard/produits-prepares) — un regroupement nommé de PreparedProduct,
+// choisi dans l'onglet Catalogue au même titre que "Reprendre un live
+// précédent" (cf. CatalogProductsPanel).
+type ProductCatalog = {
+  id: string;
+  name: string;
+  scheduled_for: string | null;
 };
 
 type RapidItem = {
@@ -192,6 +203,7 @@ export function RapidConsoleClient({
   initialOrderItemDates,
   preparedProducts,
   previousLives,
+  productCatalogs,
   shopSettings,
 }: {
   liveId: string;
@@ -202,6 +214,7 @@ export function RapidConsoleClient({
   initialOrderItemDates: OrderItemDate[];
   preparedProducts: (Omit<PreparedProduct, "discount_tiers_cents"> & { discount_tiers_cents: unknown })[];
   previousLives: PreviousLive[];
+  productCatalogs: ProductCatalog[];
   shopSettings: ShopSettings;
 }) {
   const [products, setProducts] = useState<LiveProduct[]>(() =>
@@ -220,6 +233,12 @@ export function RapidConsoleClient({
   // dans le panel) pour que handleDragEnd puisse résoudre le prix d'un
   // produit "previous:" glissé (ex. calcul du plafond unpaidOrderRestriction).
   const [previousLiveProducts, setPreviousLiveProducts] = useState<PreparedProduct[]>([]);
+  // Même principe pour le catalogue préparé sélectionné (cf.
+  // getCatalogProducts) — un item de catalogue référence un prepared_product,
+  // donc résolu/matérialisé exactement comme un produit "prepared:" (préfixe
+  // "catalog:" seulement pour que handleDragStart/performAssign sachent
+  // chercher dans catalogProducts plutôt que preparedProductsList).
+  const [catalogProducts, setCatalogProducts] = useState<PreparedProduct[]>([]);
   const [items, setItems] = useState(initialItems);
   const [itemProducts, setItemProducts] = useState(initialItemProducts);
   const [orders, setOrders] = useState(initialOrders);
@@ -374,6 +393,11 @@ export function RapidConsoleClient({
       setDraggedProduct(previousLiveProducts.find((p) => p.id === previousId) ?? null);
       return;
     }
+    if (id.startsWith("catalog:")) {
+      const catalogProductId = id.slice("catalog:".length);
+      setDraggedProduct(catalogProducts.find((p) => p.id === catalogProductId) ?? null);
+      return;
+    }
     setDraggedProduct(products.find((p) => p.id === id) ?? null);
   }
 
@@ -425,11 +449,15 @@ export function RapidConsoleClient({
 
   // Assignation effective, factorisée pour être appelée directement (aucun
   // blocage) ou après confirmation du vendeur dans PendingOrderAlertDialog.
-  // productId peut porter un préfixe "prepared:"/"previous:" (cartes de
-  // l'onglet Catalogue, cf. CatalogProductsPanel) — matérialise d'abord en
-  // live_products via la RPC correspondante, puis assigne normalement. Une
-  // carte "à la volée" (déjà un live_products de CE live) n'a pas de préfixe
-  // et saute directement à assignRapidItemToProduct comme avant.
+  // productId peut porter un préfixe "prepared:"/"previous:"/"catalog:"
+  // (cartes de l'onglet Catalogue, cf. CatalogProductsPanel) — matérialise
+  // d'abord en live_products via la RPC correspondante, puis assigne
+  // normalement. Une carte "à la volée" (déjà un live_products de CE live)
+  // n'a pas de préfixe et saute directement à assignRapidItemToProduct comme
+  // avant. "catalog:" réutilise materializeFromPrepared (même RPC que
+  // "prepared:") : un item de catalogue référence toujours un
+  // prepared_product_id, sa matérialisation ne dépend jamais de son
+  // appartenance à un catalogue.
   const performAssign = useCallback(
     (itemId: string, rawProductId: string, quantity: number) => {
       runAction(async () => {
@@ -445,6 +473,10 @@ export function RapidConsoleClient({
           );
           if (!materialized) return;
           productId = materialized.id;
+        } else if (rawProductId.startsWith("catalog:")) {
+          const materialized = await materializeFromPrepared(liveId, rawProductId.slice("catalog:".length));
+          if (!materialized) return;
+          productId = materialized.id;
         }
         await assignRapidItemToProduct(liveId, itemId, productId, quantity);
       });
@@ -453,9 +485,9 @@ export function RapidConsoleClient({
     [liveId, runAction]
   );
 
-  // Résout le prix d'un productId potentiellement préfixé ("prepared:"/
-  // "previous:") — sert au calcul du plafond unpaidOrderRestriction dans
-  // handleDragEnd, avant toute matérialisation.
+  // Résout le prix d'un productId potentiellement préfixé
+  // ("prepared:"/"previous:"/"catalog:") — sert au calcul du plafond
+  // unpaidOrderRestriction dans handleDragEnd, avant toute matérialisation.
   const resolveProductPriceCents = useCallback(
     (productId: string): number => {
       if (productId.startsWith("prepared:")) {
@@ -466,9 +498,13 @@ export function RapidConsoleClient({
         const id = productId.slice("previous:".length);
         return previousLiveProducts.find((p) => p.id === id)?.price_cents ?? 0;
       }
+      if (productId.startsWith("catalog:")) {
+        const id = productId.slice("catalog:".length);
+        return catalogProducts.find((p) => p.id === id)?.price_cents ?? 0;
+      }
       return products.find((p) => p.id === productId)?.price_cents ?? 0;
     },
-    [preparedProductsList, previousLiveProducts, products]
+    [preparedProductsList, previousLiveProducts, catalogProducts, products]
   );
 
   function handleDragEnd(event: DragEndEvent) {
@@ -597,6 +633,9 @@ export function RapidConsoleClient({
                 previousLives={previousLives}
                 previousLiveProducts={previousLiveProducts}
                 setPreviousLiveProducts={setPreviousLiveProducts}
+                productCatalogs={productCatalogs}
+                catalogProducts={catalogProducts}
+                setCatalogProducts={setCatalogProducts}
                 countByProduct={countByProduct}
                 dragQuantities={dragQuantities}
                 setDragQuantities={setDragQuantities}
@@ -1153,18 +1192,21 @@ function ActiveAndPreviousProducts({
   );
 }
 
-// Onglet "Catalogue" : deux sources de cartes glissables, préfixées
-// ("prepared:"/"previous:") pour que performAssign (RapidConsoleClient)
-// sache quelle RPC de matérialisation appeler avant assignRapidItemToProduct
-// — glisser une de ces cartes ne modifie rien tant que le drop n'a pas eu
-// lieu (contrairement à "À la volée", ces produits n'existent pas encore
-// dans live_products pour CE live).
+// Onglet "Catalogue" : trois sources de cartes glissables, préfixées
+// ("prepared:"/"previous:"/"catalog:") pour que performAssign
+// (RapidConsoleClient) sache quelle RPC de matérialisation appeler avant
+// assignRapidItemToProduct — glisser une de ces cartes ne modifie rien tant
+// que le drop n'a pas eu lieu (contrairement à "À la volée", ces produits
+// n'existent pas encore dans live_products pour CE live).
 function CatalogProductsPanel({
   catalogSearch,
   preparedProducts,
   previousLives,
   previousLiveProducts,
   setPreviousLiveProducts,
+  productCatalogs,
+  catalogProducts,
+  setCatalogProducts,
   countByProduct,
   dragQuantities,
   setDragQuantities,
@@ -1174,12 +1216,17 @@ function CatalogProductsPanel({
   previousLives: PreviousLive[];
   previousLiveProducts: PreparedProduct[];
   setPreviousLiveProducts: (products: PreparedProduct[]) => void;
+  productCatalogs: ProductCatalog[];
+  catalogProducts: PreparedProduct[];
+  setCatalogProducts: (products: PreparedProduct[]) => void;
   countByProduct: Map<string, number>;
   dragQuantities: Record<string, number>;
   setDragQuantities: (updater: (prev: Record<string, number>) => Record<string, number>) => void;
 }) {
   const [selectedPreviousLiveId, setSelectedPreviousLiveId] = useState("");
   const [isLoadingPrevious, setIsLoadingPrevious] = useState(false);
+  const [selectedCatalogId, setSelectedCatalogId] = useState("");
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
 
   const normalizedSearch = catalogSearch.trim().toLowerCase();
   const filteredPrepared = normalizedSearch
@@ -1188,6 +1235,9 @@ function CatalogProductsPanel({
   const filteredPrevious = normalizedSearch
     ? previousLiveProducts.filter((p) => p.name.toLowerCase().includes(normalizedSearch))
     : previousLiveProducts;
+  const filteredCatalogProducts = normalizedSearch
+    ? catalogProducts.filter((p) => p.name.toLowerCase().includes(normalizedSearch))
+    : catalogProducts;
 
   const handleSelectPreviousLive = (liveId: string) => {
     setSelectedPreviousLiveId(liveId);
@@ -1201,6 +1251,20 @@ function CatalogProductsPanel({
         )
       )
       .finally(() => setIsLoadingPrevious(false));
+  };
+
+  const handleSelectCatalog = (catalogId: string) => {
+    setSelectedCatalogId(catalogId);
+    setCatalogProducts([]);
+    if (!catalogId) return;
+    setIsLoadingCatalog(true);
+    getCatalogProducts(catalogId)
+      .then((products) =>
+        setCatalogProducts(
+          products.map((p) => ({ ...p, discount_tiers_cents: parseDiscountTiers(p.discount_tiers_cents) }))
+        )
+      )
+      .finally(() => setIsLoadingCatalog(false));
   };
 
   return (
@@ -1227,6 +1291,54 @@ function CatalogProductsPanel({
                     quantity={dragQuantities[`prepared:${product.id}`] ?? 1}
                     onQuantityChange={(value) =>
                       setDragQuantities((prev) => ({ ...prev, [`prepared:${product.id}`]: value }))
+                    }
+                  />
+                </DraggableProductCard>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <Separator />
+
+      <div className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium text-foreground">Choisir un catalogue préparé</h3>
+        <Select value={selectedCatalogId} onValueChange={(v) => handleSelectCatalog(v as string)}>
+          <SelectTrigger>
+            <SelectValue placeholder="Choisir un catalogue…" />
+          </SelectTrigger>
+          <SelectContent>
+            {productCatalogs.map((catalog) => (
+              <SelectItem key={catalog.id} value={catalog.id}>
+                {catalog.name}
+                {catalog.scheduled_for &&
+                  ` — ${new Date(`${catalog.scheduled_for}T00:00:00`).toLocaleDateString("fr-FR", {
+                    day: "numeric",
+                    month: "long",
+                  })}`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {isLoadingCatalog ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">Chargement…</p>
+        ) : selectedCatalogId && filteredCatalogProducts.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">
+            Aucun produit dans ce catalogue.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {filteredCatalogProducts.map((product) => (
+              <li key={product.id} className="list-none">
+                <DraggableProductCard id={`catalog:${product.id}`}>
+                  <CatalogProductCard
+                    product={product}
+                    count={countByProduct.get(product.id) ?? 0}
+                    quantity={dragQuantities[`catalog:${product.id}`] ?? 1}
+                    onQuantityChange={(value) =>
+                      setDragQuantities((prev) => ({ ...prev, [`catalog:${product.id}`]: value }))
                     }
                   />
                 </DraggableProductCard>

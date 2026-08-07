@@ -1022,6 +1022,74 @@ export type Database = {
           },
         ]
       }
+      product_catalog_items: {
+        Row: {
+          catalog_id: string
+          created_at: string
+          prepared_product_id: string
+        }
+        Insert: {
+          catalog_id: string
+          created_at?: string
+          prepared_product_id: string
+        }
+        Update: {
+          catalog_id?: string
+          created_at?: string
+          prepared_product_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_catalog_items_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "product_catalogs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_catalog_items_prepared_product_id_fkey"
+            columns: ["prepared_product_id"]
+            isOneToOne: false
+            referencedRelation: "prepared_products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_catalogs: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          scheduled_for: string | null
+          shop_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          scheduled_for?: string | null
+          shop_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          scheduled_for?: string | null
+          shop_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_catalogs_shop_id_fkey"
+            columns: ["shop_id"]
+            isOneToOne: false
+            referencedRelation: "shops"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_designs: {
         Row: {
           created_at: string
