@@ -1241,9 +1241,19 @@ function CatalogProductsPanel({
   const filteredPrevious = normalizedSearch
     ? previousLiveProducts.filter((p) => p.name.toLowerCase().includes(normalizedSearch))
     : previousLiveProducts;
+  // Les produits déjà à l'antenne remontent en haut de la pile — sinon un
+  // catalogue avec beaucoup de produits oblige à faire défiler pour
+  // retrouver celui qu'on vient d'activer. Tri stable : l'ordre relatif
+  // d'origine (celui de product_catalog_items, cf. getCatalogProducts) est
+  // préservé à l'intérieur de chaque groupe actif/inactif.
+  const sortedCatalogProducts = [...catalogProducts].sort((a, b) => {
+    const aActive = a.liveProduct && !a.liveProduct.retired_at ? 1 : 0;
+    const bActive = b.liveProduct && !b.liveProduct.retired_at ? 1 : 0;
+    return bActive - aActive;
+  });
   const filteredCatalogProducts = normalizedSearch
-    ? catalogProducts.filter((p) => p.name.toLowerCase().includes(normalizedSearch))
-    : catalogProducts;
+    ? sortedCatalogProducts.filter((p) => p.name.toLowerCase().includes(normalizedSearch))
+    : sortedCatalogProducts;
 
   const handleSelectPreviousLive = (liveId: string) => {
     setSelectedPreviousLiveId(liveId);
