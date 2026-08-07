@@ -60,6 +60,43 @@ export async function retireRapidProduct(liveId: string, productId: string) {
   revalidatePath(`/dashboard/live/${liveId}`);
 }
 
+// Suppression réelle et définitive d'un produit "à la volée" (contrairement
+// à retireRapidProduct ci-dessus, qui le garde visible dans "produits
+// précédents") — pour un produit créé par erreur qu'on ne veut plus voir
+// nulle part. Jamais si des intentions d'achat y sont déjà rattachées
+// (live_rapid_item_products, ON DELETE CASCADE sur live_product_id) : le
+// supprimer effacerait silencieusement ces assignations plutôt que de forcer
+// le vendeur à d'abord les désassigner ou passer par "Retirer". Sans risque
+// pour les commandes déjà finalisées : live_order_items ne référence jamais
+// live_products, seulement live_rapid_item_products (avant transformation en
+// commande).
+export async function deleteRapidProduct(
+  liveId: string,
+  productId: string
+): Promise<{ error?: string }> {
+  const shop = await getOwnShop();
+  const supabase = await createClient();
+
+  const { count } = await supabase
+    .from("live_rapid_item_products")
+    .select("id", { count: "exact", head: true })
+    .eq("live_product_id", productId);
+
+  if (count && count > 0) {
+    return { error: "Ce produit est déjà assigné à une intention d'achat, impossible de le supprimer." };
+  }
+
+  await supabase
+    .from("live_products")
+    .delete()
+    .eq("id", productId)
+    .eq("live_id", liveId)
+    .eq("shop_id", shop.id);
+
+  revalidatePath(`/dashboard/live/${liveId}`);
+  return {};
+}
+
 // Remet un produit précédent à l'antenne (ex. rupture de stock résolue,
 // retour sur un article) — s'ajoute aux produits déjà actifs, n'en retire
 // aucun.

@@ -49,6 +49,7 @@ import {
   reactivateRapidProduct,
   updateRapidProductPrice,
   updateRapidProductDiscountTiers,
+  deleteRapidProduct,
   assignRapidItemToProduct,
   unassignRapidItem,
   deleteRapidItem,
@@ -66,6 +67,7 @@ import {
 import {
   updatePreparedProductPrice,
   updatePreparedProductDiscountTiers,
+  deletePreparedProduct,
 } from "../../produits-prepares/actions";
 
 type LiveProduct = {
@@ -1360,6 +1362,9 @@ function CatalogProductsPanel({
                         )
                       )
                     }
+                    onDeleted={() =>
+                      setCatalogProducts(catalogProducts.filter((p) => p.id !== product.id))
+                    }
                   />
                 </DraggableProductCard>
               </li>
@@ -1489,6 +1494,7 @@ function CatalogPreparedProductCard({
   isPending,
   startTransition,
   onProductChanged,
+  onDeleted,
 }: {
   liveId: string;
   product: CatalogProduct;
@@ -1498,6 +1504,7 @@ function CatalogPreparedProductCard({
   isPending: boolean;
   startTransition: (callback: () => void | Promise<void>) => void;
   onProductChanged: (product: CatalogProduct) => void;
+  onDeleted: () => void;
 }) {
   const isActive = !!product.liveProduct && !product.liveProduct.retired_at;
 
@@ -1522,7 +1529,11 @@ function CatalogPreparedProductCard({
             </div>
           </div>
           <div className="mt-4 flex items-center justify-end gap-2 border-t pt-3">
-            <EditablePreparedProductPrice product={product} onChanged={onProductChanged} />
+            <EditablePreparedProductPrice
+              product={product}
+              onChanged={onProductChanged}
+              onDeleted={onDeleted}
+            />
             <EditablePreparedProductDiscountTiers product={product} onChanged={onProductChanged} />
             <Button
               size="sm"
@@ -1586,18 +1597,32 @@ function CatalogPreparedProductCard({
 // updatePreparedProductPrice/DiscountTiers (produits-prepares/actions.ts) —
 // le produit d'une carte "catalog:" est un prepared_product, pas encore un
 // live_products tant qu'il n'a pas été matérialisé (glissé, ou "Mettre à
-// l'antenne").
+// l'antenne"). onDeleted supprime ce prepared_product lui-même (donc sort le
+// produit de tous les catalogues qui le contenaient, cf. ON DELETE CASCADE
+// sur product_catalog_items) — n'affecte jamais un éventuel live_products
+// déjà matérialisé pour ce produit (ON DELETE SET NULL sur
+// source_prepared_product_id), qui continue d'exister côté "à la volée".
 function EditablePreparedProductPrice<T extends PreparedProduct>({
   product,
   onChanged,
+  onDeleted,
 }: {
   product: T;
   onChanged: (product: T) => void;
+  onDeleted: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setConfirmingDelete(false);
+      }}
+    >
       <PopoverTrigger
         render={
           <Button
@@ -1665,6 +1690,28 @@ function EditablePreparedProductPrice<T extends PreparedProduct>({
             </Button>
           </div>
         </form>
+
+        <Separator className="my-3" />
+
+        <Button
+          type="button"
+          size="sm"
+          variant={confirmingDelete ? "destructive" : "ghost"}
+          disabled={isDeleting}
+          className={cn("w-full", !confirmingDelete && "text-destructive hover:text-destructive")}
+          onClick={async () => {
+            if (!confirmingDelete) {
+              setConfirmingDelete(true);
+              return;
+            }
+            setIsDeleting(true);
+            await deletePreparedProduct(product.id);
+            setOpen(false);
+            onDeleted();
+          }}
+        >
+          {confirmingDelete ? "Confirmer la suppression ?" : "Supprimer"}
+        </Button>
       </PopoverContent>
     </Popover>
   );
@@ -1877,9 +1924,24 @@ function EditablePrice({
   startTransition: (callback: () => void) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Confirmation à deux clics dans le même popover plutôt qu'un AlertDialog
+  // imbriqué dans ce Popover (risque de conflit focus/z-index entre les deux
+  // primitives Base UI) — le bouton "Supprimer" devient "Confirmer ?" au
+  // premier clic, la suppression réelle n'a lieu qu'au second.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) {
+          setConfirmingDelete(false);
+          setDeleteError(null);
+        }
+      }}
+    >
       <PopoverTrigger
         render={
           <Button
@@ -1942,6 +2004,33 @@ function EditablePrice({
             </Button>
           </div>
         </form>
+
+        <Separator className="my-3" />
+
+        {deleteError && <p className="mb-2 text-xs text-destructive">{deleteError}</p>}
+        <Button
+          type="button"
+          size="sm"
+          variant={confirmingDelete ? "destructive" : "ghost"}
+          className={cn("w-full", !confirmingDelete && "text-destructive hover:text-destructive")}
+          onClick={() => {
+            if (!confirmingDelete) {
+              setConfirmingDelete(true);
+              return;
+            }
+            startTransition(async () => {
+              const result = await deleteRapidProduct(liveId, product.id);
+              if (result.error) {
+                setConfirmingDelete(false);
+                setDeleteError(result.error);
+              } else {
+                setOpen(false);
+              }
+            });
+          }}
+        >
+          {confirmingDelete ? "Confirmer la suppression ?" : "Supprimer"}
+        </Button>
       </PopoverContent>
     </Popover>
   );
