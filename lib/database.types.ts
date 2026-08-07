@@ -537,6 +537,7 @@ export type Database = {
           retired_at: string | null
           shop_id: string
           simple_discount_cents: number
+          source_prepared_product_id: string | null
           weight_grams: number | null
         }
         Insert: {
@@ -550,6 +551,7 @@ export type Database = {
           retired_at?: string | null
           shop_id: string
           simple_discount_cents?: number
+          source_prepared_product_id?: string | null
           weight_grams?: number | null
         }
         Update: {
@@ -563,6 +565,7 @@ export type Database = {
           retired_at?: string | null
           shop_id?: string
           simple_discount_cents?: number
+          source_prepared_product_id?: string | null
           weight_grams?: number | null
         }
         Relationships: [
@@ -578,6 +581,13 @@ export type Database = {
             columns: ["shop_id"]
             isOneToOne: false
             referencedRelation: "shops"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_products_source_prepared_product_id_fkey"
+            columns: ["source_prepared_product_id"]
+            isOneToOne: false
+            referencedRelation: "prepared_products"
             referencedColumns: ["id"]
           },
         ]
@@ -1646,6 +1656,7 @@ export type Database = {
           retired_at: string | null
           shop_id: string
           simple_discount_cents: number
+          source_prepared_product_id: string | null
           weight_grams: number | null
         }
         SetofOptions: {
@@ -1672,6 +1683,7 @@ export type Database = {
           retired_at: string | null
           shop_id: string
           simple_discount_cents: number
+          source_prepared_product_id: string | null
           weight_grams: number | null
         }
         SetofOptions: {
@@ -1698,6 +1710,7 @@ export type Database = {
           retired_at: string | null
           shop_id: string
           simple_discount_cents: number
+          source_prepared_product_id: string | null
           weight_grams: number | null
         }
         SetofOptions: {

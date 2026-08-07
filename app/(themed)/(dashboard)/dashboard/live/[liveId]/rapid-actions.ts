@@ -466,13 +466,19 @@ export async function getProductCatalogs(): Promise<
   return data ?? [];
 }
 
-// Produits préparés (prepared_products) appartenant à UN catalogue donné —
-// appelée au changement de sélection dans le <Select> "Choisir un catalogue
+// Produits préparés (prepared_products) appartenant à UN catalogue donné,
+// avec pour chacun l'éventuel live_products déjà matérialisé pour CE live
+// précis (via source_prepared_product_id, cf. migration
+// live_products_source_prepared) — sert à CatalogProductCard pour basculer
+// entre son rendu "à l'antenne" (bordure cyan, Modifier/Remises/Retirer,
+// identique aux produits à la volée actifs) et son rendu simple ("Mettre à
+// l'antenne") selon que le produit a déjà été matérialisé pour ce live.
+// Appelée au changement de sélection dans le <Select> "Choisir un catalogue
 // préparé", même pattern que getPreviousLiveProducts. Matérialisés ensuite
 // via materializeFromPrepared (même RPC que la source "Produits préparés" :
 // un item de catalogue référence toujours un prepared_product_id, la
 // matérialisation ne dépend jamais de son appartenance à un catalogue).
-export async function getCatalogProducts(catalogId: string) {
+export async function getCatalogProducts(liveId: string, catalogId: string) {
   const shop = await getOwnShop();
   const supabase = await createClient();
 
@@ -484,5 +490,24 @@ export async function getCatalogProducts(catalogId: string) {
     .eq("catalog_id", catalogId)
     .eq("prepared_products.shop_id", shop.id);
 
-  return (data ?? []).map((row) => row.prepared_products);
+  const preparedProducts = (data ?? []).map((row) => row.prepared_products);
+  if (preparedProducts.length === 0) return [];
+
+  const { data: materialized } = await supabase
+    .from("live_products")
+    .select("id, source_prepared_product_id, retired_at, internal_ref")
+    .eq("live_id", liveId)
+    .in(
+      "source_prepared_product_id",
+      preparedProducts.map((p) => p.id)
+    );
+
+  const materializedByPreparedId = new Map(
+    (materialized ?? []).map((m) => [m.source_prepared_product_id, m])
+  );
+
+  return preparedProducts.map((product) => ({
+    ...product,
+    liveProduct: materializedByPreparedId.get(product.id) ?? null,
+  }));
 }

@@ -89,6 +89,16 @@ type PreparedProduct = {
   simple_discount_cents: number;
 };
 
+// Produit d'un catalogue préparé (source "catalog:") avec l'éventuel
+// live_products déjà matérialisé pour CE live (cf. getCatalogProducts,
+// rapid-actions.ts, via live_products.source_prepared_product_id) — permet à
+// CatalogProductCard de basculer entre son rendu "à l'antenne" (identique
+// aux produits à la volée actifs) et son rendu simple ("Mettre à
+// l'antenne"), null quand jamais matérialisé pour ce live.
+type CatalogProduct = PreparedProduct & {
+  liveProduct: { id: string; retired_at: string | null; internal_ref: string } | null;
+};
+
 type PreviousLive = {
   id: string;
   started_at: string | null;
@@ -243,7 +253,7 @@ export function RapidConsoleClient({
   // matérialisé via materializeFromPrepared comme n'importe quel produit
   // préparé (préfixe "catalog:" seulement pour que
   // handleDragStart/performAssign sachent chercher dans catalogProducts).
-  const [catalogProducts, setCatalogProducts] = useState<PreparedProduct[]>([]);
+  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [items, setItems] = useState(initialItems);
   const [itemProducts, setItemProducts] = useState(initialItemProducts);
   const [orders, setOrders] = useState(initialOrders);
@@ -1212,8 +1222,8 @@ function CatalogProductsPanel({
   previousLiveProducts: PreparedProduct[];
   setPreviousLiveProducts: (products: PreparedProduct[]) => void;
   productCatalogs: ProductCatalog[];
-  catalogProducts: PreparedProduct[];
-  setCatalogProducts: (products: PreparedProduct[]) => void;
+  catalogProducts: CatalogProduct[];
+  setCatalogProducts: (products: CatalogProduct[]) => void;
   isPending: boolean;
   startTransition: (callback: () => void) => void;
   countByProduct: Map<string, number>;
@@ -1247,18 +1257,38 @@ function CatalogProductsPanel({
       .finally(() => setIsLoadingPrevious(false));
   };
 
-  const handleSelectCatalog = (catalogId: string) => {
+  const handleSelectCatalog = async (catalogId: string) => {
     setSelectedCatalogId(catalogId);
     setCatalogProducts([]);
     if (!catalogId) return;
     setIsLoadingCatalog(true);
-    getCatalogProducts(catalogId)
-      .then((products) =>
+
+    const products = await getCatalogProducts(liveId, catalogId);
+    const parsed: CatalogProduct[] = products.map((p) => ({
+      ...p,
+      discount_tiers_cents: parseDiscountTiers(p.discount_tiers_cents),
+    }));
+
+    // Le premier produit du catalogue passe automatiquement à l'antenne dès
+    // la sélection, s'il ne l'est pas déjà pour ce live — cohérent avec
+    // "démarrer le live avec au moins un article visible" sans exiger un
+    // clic supplémentaire. Les suivants restent inactifs jusqu'à un clic
+    // explicite "Mettre à l'antenne". startTransition (runAction du parent)
+    // rafraîchit "Produits actifs" côté À la volée après la matérialisation.
+    const first = parsed[0];
+    if (first && !first.liveProduct) {
+      startTransition(async () => {
+        await materializeFromPrepared(liveId, first.id);
+        const refreshed = await getCatalogProducts(liveId, catalogId);
         setCatalogProducts(
-          products.map((p) => ({ ...p, discount_tiers_cents: parseDiscountTiers(p.discount_tiers_cents) }))
-        )
-      )
-      .finally(() => setIsLoadingCatalog(false));
+          refreshed.map((p) => ({ ...p, discount_tiers_cents: parseDiscountTiers(p.discount_tiers_cents) }))
+        );
+      });
+    } else {
+      setCatalogProducts(parsed);
+    }
+
+    setIsLoadingCatalog(false);
   };
 
   return (
@@ -1299,7 +1329,8 @@ function CatalogProductsPanel({
             {filteredCatalogProducts.map((product) => (
               <li key={product.id} className="list-none">
                 <DraggableProductCard id={`catalog:${product.id}`}>
-                  <CatalogProductCard
+                  <CatalogPreparedProductCard
+                    liveId={liveId}
                     product={product}
                     count={countByProduct.get(product.id) ?? 0}
                     quantity={dragQuantities[`catalog:${product.id}`] ?? 1}
@@ -1307,14 +1338,12 @@ function CatalogProductsPanel({
                       setDragQuantities((prev) => ({ ...prev, [`catalog:${product.id}`]: value }))
                     }
                     isPending={isPending}
-                    onActivate={() =>
-                      startTransition(async () => {
-                        await materializeFromPrepared(liveId, product.id);
-                      })
-                    }
+                    startTransition={startTransition}
                     onProductChanged={(updated) =>
                       setCatalogProducts(
-                        catalogProducts.map((p) => (p.id === updated.id ? updated : p))
+                        catalogProducts.map((p) =>
+                          p.id === updated.id ? { ...updated, liveProduct: p.liveProduct } : p
+                        )
                       )
                     }
                   />
@@ -1377,35 +1406,22 @@ function CatalogProductsPanel({
   );
 }
 
-// Carte glissable commune aux deux sources catalogue (produits préparés /
-// produits d'un live précédent) — même style que les cartes "à la volée"
-// mais sans badge internal_ref (n'existe pas tant que non matérialisé).
-//
-// isPending/onActivate/onProductChanged sont optionnelles : seule la source
-// "catalog:" (prepared_products, cf. CatalogProductsPanel) les fournit —
-// "Mettre à l'antenne" matérialise le produit (déjà actif par défaut dès sa
-// création, cf. create_live_product_from_prepared/retired_at nullable) sans
-// passer par une intention d'achat, et Modifier/Remises éditent le
-// prepared_product directement puisqu'aucun live_products n'existe encore
-// pour lui. La source "previous:" (produits d'un live précédent, déjà
-// d'anciens live_products) n'a pas de prepared_product sous-jacent à éditer
-// ici, et n'affiche donc aucun de ces boutons.
+// Carte glissable pour "previous:" (produits d'un live précédent, déjà
+// d'anciens live_products) — même style que les cartes "à la volée" mais
+// sans badge internal_ref (n'existe pas tant que non re-matérialisé pour CE
+// live). Pas de Modifier/Remises/Mettre à l'antenne ici : il n'y a pas de
+// prepared_product sous-jacent à éditer, contrairement aux produits d'un
+// catalogue préparé (cf. CatalogPreparedProductCard ci-dessous).
 function CatalogProductCard({
   product,
   count,
   quantity,
   onQuantityChange,
-  isPending,
-  onActivate,
-  onProductChanged,
 }: {
   product: PreparedProduct;
   count: number;
   quantity: number;
   onQuantityChange: (value: number) => void;
-  isPending?: boolean;
-  onActivate?: () => void;
-  onProductChanged?: (product: PreparedProduct) => void;
 }) {
   return (
     <Card>
@@ -1423,7 +1439,74 @@ function CatalogProductCard({
             <QuantityStepper value={quantity} onChange={onQuantityChange} />
           </div>
         </div>
-        {onActivate && onProductChanged && (
+      </CardContent>
+    </Card>
+  );
+}
+
+// Carte glissable pour "catalog:" (produits préparés, cf.
+// CatalogProductsPanel) — bascule entre DEUX rendus complets selon que le
+// produit a déjà été matérialisé en live_products pour CE live
+// (product.liveProduct, cf. getCatalogProducts/source_prepared_product_id) :
+//
+// - Actif (liveProduct existe, retired_at null) : même rendu que les
+//   produits "à la volée" actifs (ActiveAndPreviousProducts) — bordure
+//   cyan, badge "À l'antenne", Modifier/Remises/Retirer. "Retirer" agit sur
+//   le live_products matérialisé (retireRapidProduct), pas sur le
+//   prepared_product source.
+// - Retiré (liveProduct existe, retired_at posé) : rendu simple façon
+//   "Produits précédents" (référence interne visible) + "Mettre à
+//   l'antenne" qui RÉ-active ce même live_products (reactivateRapidProduct),
+//   sans en recréer un second.
+// - Jamais matérialisé (liveProduct null) : rendu simple sans référence +
+//   "Mettre à l'antenne" qui matérialise pour la première fois
+//   (materializeFromPrepared).
+//
+// Modifier/Remises éditent toujours le prepared_product directement (pas le
+// live_products, même une fois actif) : la bibliothèque catalogue reste la
+// source de vérité pour ces réglages, cohérent avec "un produit vit dans un
+// catalogue" (cf. /dashboard/produits-prepares).
+function CatalogPreparedProductCard({
+  liveId,
+  product,
+  count,
+  quantity,
+  onQuantityChange,
+  isPending,
+  startTransition,
+  onProductChanged,
+}: {
+  liveId: string;
+  product: CatalogProduct;
+  count: number;
+  quantity: number;
+  onQuantityChange: (value: number) => void;
+  isPending: boolean;
+  startTransition: (callback: () => void | Promise<void>) => void;
+  onProductChanged: (product: CatalogProduct) => void;
+}) {
+  const isActive = !!product.liveProduct && !product.liveProduct.retired_at;
+
+  if (isActive) {
+    return (
+      <Card className="border-secondary shadow-[0_0_0_1px_rgba(37,244,238,0.08),0_8px_24px_-12px_rgba(37,244,238,0.35)]">
+        <CardContent className="p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <Badge variant="default" className="mb-2">
+                À l&apos;antenne
+              </Badge>
+              <p className="truncate text-base font-medium text-foreground">{product.name}</p>
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <p className="text-sm text-muted-foreground">{(product.price_cents / 100).toFixed(2)} €</p>
+                <DiscountSummary product={product} />
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-3">
+              <span className="text-sm tabular-nums text-muted-foreground">{count} preneurs</span>
+              <QuantityStepper value={quantity} onChange={onQuantityChange} />
+            </div>
+          </div>
           <div className="mt-4 flex items-center justify-end gap-2 border-t pt-3">
             <EditablePreparedProductPrice product={product} onChanged={onProductChanged} />
             <EditablePreparedProductDiscountTiers product={product} onChanged={onProductChanged} />
@@ -1432,12 +1515,53 @@ function CatalogProductCard({
               variant="secondary"
               disabled={isPending}
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={onActivate}
+              onClick={() => {
+                const liveProductId = product.liveProduct?.id;
+                if (!liveProductId) return;
+                startTransition(async () => {
+                  await retireRapidProduct(liveId, liveProductId);
+                });
+              }}
             >
-              Mettre à l&apos;antenne
+              Retirer
             </Button>
           </div>
-        )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardContent className="flex items-center justify-between p-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-foreground">{product.name}</p>
+          <p className="text-xs text-muted-foreground">
+            {product.liveProduct && `${product.liveProduct.internal_ref} · `}
+            {(product.price_cents / 100).toFixed(2)} €
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="text-sm tabular-nums text-muted-foreground">{count} preneurs</span>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={isPending}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => {
+              const liveProductId = product.liveProduct?.id;
+              startTransition(async () => {
+                if (liveProductId) {
+                  await reactivateRapidProduct(liveId, liveProductId);
+                } else {
+                  await materializeFromPrepared(liveId, product.id);
+                }
+              });
+            }}
+          >
+            Mettre à l&apos;antenne
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
@@ -1449,12 +1573,12 @@ function CatalogProductCard({
 // le produit d'une carte "catalog:" est un prepared_product, pas encore un
 // live_products tant qu'il n'a pas été matérialisé (glissé, ou "Mettre à
 // l'antenne").
-function EditablePreparedProductPrice({
+function EditablePreparedProductPrice<T extends PreparedProduct>({
   product,
   onChanged,
 }: {
-  product: PreparedProduct;
-  onChanged: (product: PreparedProduct) => void;
+  product: T;
+  onChanged: (product: T) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -1532,12 +1656,12 @@ function EditablePreparedProductPrice({
   );
 }
 
-function EditablePreparedProductDiscountTiers({
+function EditablePreparedProductDiscountTiers<T extends PreparedProduct>({
   product,
   onChanged,
 }: {
-  product: PreparedProduct;
-  onChanged: (product: PreparedProduct) => void;
+  product: T;
+  onChanged: (product: T) => void;
 }) {
   const [open, setOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
