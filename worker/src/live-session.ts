@@ -53,6 +53,15 @@ function extractCloseCode(reason: string): number | null {
 function buildEulerErrorMessage(reason: string): string {
   const code = extractCloseCode(reason);
   if (code === null) return reason;
+  // NOT_LIVE (4404) est le cas le plus fréquent vu par un vendeur (pseudo
+  // correct mais aucun live TikTok en cours) — describeCloseCode retombe sur
+  // le texte brut du SDK Euler ("Streamer is not live"), en anglais et peu
+  // clair pour quelqu'un qui ne connaît pas Euler. Message dédié pour ce cas
+  // précis ; les autres codes gardent le texte générique du SDK + le code,
+  // utile pour le support si un vendeur le rapporte.
+  if (code === NOT_LIVE_CLOSE_CODE) {
+    return "Aucun live TikTok en cours pour ce pseudo. Vérifie que le live a bien démarré côté TikTok, puis réessaie.";
+  }
   return `${describeCloseCode(code)} (code ${code})`;
 }
 
